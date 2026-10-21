@@ -1,0 +1,6 @@
+name: belief-refinement
+kind: inferred
+shape: categorical
+face: in
+membrane: true
+note: a standing belief got sharpened — same conviction, better edges; garden the concept in the same commit
