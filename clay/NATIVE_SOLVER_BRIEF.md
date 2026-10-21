@@ -258,6 +258,49 @@ swap active) — absolutes on a calm box may differ; ratios in-binary hold.
 trees: koru-libs 4e2f332 (main), koru 4c2f38b30 (main), nanoui ede1eb4 (clone)
 ```
 
+race 2026-10-21 — `clay/tests/bench_corpus.k`: the full gated surface
+as the workload — the fuzz gate's generator + both walks verbatim
+(generator and walks diff-verified identical to fuzz_gate.k), MUT
+dropped, print-drain swapped for counted drain, 6 interleaved laps per
+frame. ReleaseFast, laptop (same basis rule as the race above — Debug
+inflates nl's win ~5x on solve since -O0 punishes Clay's C far harder;
+the Debug run showed solve 12.1 vs 4.25, ReleaseFast collapses it).
+Numbers (frame median, ms):
+
+| lap | clay | nl | ratio |
+|---|---|---|---|
+| declare | 0.283 | 19.11 | nl ~68x slower |
+| solve | 2.33 | 2.14 | nl ~1.09x faster |
+| drain | ~0 | ~0 | — |
+| cmds (frame 1 / 2+) | 2106 / 2092 | 2106 / 2106 | |
+
+Two findings, both real:
+1. nl declare is ~68x SLOWER (ReleaseFast; ~12x under Debug) — the
+   missing measure-text cache.
+   `koru_clay_measure` builds CTFont+CFAttributedString+CTLine per call
+   (real Core Text shaping, ~us each); Clay's measureTextHashMap is
+   PERSISTENT memory so frames 2+ measure nothing, while nl's
+   measureWords is "MeasureTextCached minus the cache" and pays
+   ~600 shaping calls/frame (~120 text rows x ~5 calls: space,
+   per-word, whole-string — paid at declare even for later-culled
+   elements). Without text rows (bench_solvers' panel tree) nl declare
+   wins 0.24 vs 0.72 Debug; on the corpus the uncached measure
+   dominates. This is a portable gap, not a verdict.
+2. Command counts diverge on WARM frames: clay 2106 on frame 1 then
+   2092 forever; nl 2106 always. Mechanism: `layoutElementsHashMap`
+   items persist across BeginLayout, and emit stamps
+   `hashMapItem->boundingBox` at command time — a floating root sorted
+   before its parent reads the parent's STALE last-frame box (zero on
+   frame 1), shifting attach positions and cull sets. The gate can't
+   see this — it runs the layout once, so CAND==REF certifies
+   cold-frame parity only. See
+   concepts/frag-a-single-shot-gate-is-blind-to-persistent-state.md.
+   nl's frame-stability is arguably the correct behavior; mirroring
+   the stale-box quirk is an open parity decision, not done.
+Verdict on the full corpus: nl's solver is ~9% faster and the frame
+LOSES by ~8x end-to-end — the measure cache is the whole story, and it
+is the next honest port, not a reason to switch or abandon.
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,
