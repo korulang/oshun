@@ -434,6 +434,15 @@ native solver's marginal gain over nl is now measured ≈ decl + a
 0.3µs fold — real but small; it consolidates ownership rather than
 unlocking a number.
 
+LANDED (2026-10-21): lever (a) — `measure.text` now memos on
+(tx, fs, ls) in a module-level AutoHashMap (`clay/index.kz`). Verified:
+fuzz_gate cold `CAND==REF` 2106 / warm `CAND2==REF2` 2092 / MUT
+rejected; spec_snap↔spec_snap_nl BMP byte-identical; bench_scene
+ReleaseFast expand **0.021 → 0.00029**, frame **0.045 → ~0.024-0.030**
+(dirty-gate ceiling, expansion still runs every frame). The memo is
+unbounded — same eviction stance as clay's own hashmap; revisit if a
+long-lived consumer churns distinct strings.
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,

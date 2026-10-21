@@ -49,6 +49,11 @@ const c = @cImport({
 extern fn koru_clay_measure(chars: [*c]const u8, len: i32, size: f64, ls: i32) c.Clay_Dimensions;
 extern fn koru_clay_install_measure() void;
 
+// Standalone-measure memo — keyed on (tx, fs, ls), the measure-affecting
+// inputs. Clay's own cache lives inside its solve and nl has mcache; the
+// dialect bridge call bypassed both and paid ~20us per text row per frame.
+var __measure_memo: ?std.AutoHashMap(u64, Dims) = null;
+
 // The solver handle — context + the arena's memory + the last solved command
 // array (valid until the next layout bracket ends).
 pub const Clay = struct {
@@ -469,8 +474,18 @@ pub const Dims = struct {
 ~pub tor measure.text { tx: string, fs: f64, ls: f64 } -> libs/clay:Dims
 
 ~proc measure.text|zig {
-    const d = $mod.koru_clay_measure(tx.ptr, @intCast(tx.len), fs, @intFromFloat(@max(ls, 0)));
-    return .{ .w = @floatCast(d.width), .h = @floatCast(d.height) };
+    const lsi: i32 = @intFromFloat(@max(ls, 0));
+    var hh = $mod.std.hash.Wyhash.init(0);
+    hh.update(tx);
+    hh.update($mod.std.mem.asBytes(&fs));
+    hh.update($mod.std.mem.asBytes(&lsi));
+    const key = hh.final();
+    if ($mod.__measure_memo == null) $mod.__measure_memo = $mod.std.AutoHashMap(u64, $mod.Dims).init($mod.std.heap.page_allocator);
+    if ($mod.__measure_memo.?.get(key)) |d| return d;
+    const m = $mod.koru_clay_measure(tx.ptr, @intCast(tx.len), fs, lsi);
+    const out = $mod.Dims{ .w = @floatCast(m.width), .h = @floatCast(m.height) };
+    $mod.__measure_memo.?.put(key, out) catch {};
+    return out;
 }
 
 ~pub tor cmd.count { cl: *Clay<solved|ready> } -> i64
