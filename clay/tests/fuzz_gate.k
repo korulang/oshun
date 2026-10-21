@@ -37,7 +37,7 @@ std/store:new(gen) { d: 1[i64], k: 0[i64], prev: 1[i64], wk: 1[i64], hk: 1[i64] 
 
 // Spec rows in DFS order — int codes; the walk maps codes to dialect
 // words at the call site (gallery_comp convention).
-// kind: 0 panel | 1 clip | 2 img | 3 text.  wk/hk: 0 fit 1 grow 2 pct 3 fix.
+// kind: 0 panel | 1 clip | 2 img | 3 text | 4 custom.  wk/hk: 0 fit 1 grow 2 pct 3 fix.
 std/store:new(specs, capacity: 2048) {
     d: i64, kind: i64, eid: i64,
     wk: i64, w: f64, hk: i64, h: f64,
@@ -66,7 +66,7 @@ for(0..1200)
         }
         |> std/store:insert(specs) {
             gen.d,
-            kind: if (gen.k < 5) 0 else if (gen.k < 7) 1 else if (gen.k < 9) 2 else 3,
+            kind: if (gen.k < 5) 0 else if (gen.k < 7) 1 else if (gen.k < 8) 2 else if (gen.k < 9) 4 else 3,
             eid: @as(i64, @intCast(i)),
             gen.wk,
             w: if (gen.wk == 2) (if (@mod(rng.s2, 8) == 0) 1.02 + @as(f64, @floatFromInt(@mod(@divTrunc(rng.s2, 97), 58))) / 100.0 else 0.05 + @as(f64, @floatFromInt(@mod(rng.s2, 94))) / 100.0) else if (gen.wk == 1 and @mod(rng.s2, 2) == 0) 0.0 else 4.0 + @as(f64, @floatFromInt(@mod(@divTrunc(rng.s2, 300), 76))),
@@ -132,8 +132,13 @@ libs/clay:init(width: 900, height: 640)
                         | then |> libs/clay:el.text(t,
                             tx: if (s.txc == 0) "the quick brown fox jumps over the lazy dog" else if (s.txc == 1) "lorem ipsum dolor sit" else if (s.txc == 2) "ab cd" else "w",
                             s.fs, s.r, s.g, s.b, s.a, s.eid)
+                    |> if (s.kind == 4)
+                        | then |> libs/clay:el.open(t)
+                            |> libs/clay:el.custom(t, s.wk, s.w, s.hk, s.h,
+                                data: s.eid + 9000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr)
+                            |> libs/clay:el.close(t)
         | solved cls |> libs/clay:each(cl: cls)
-            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
+            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
             | drained |> _
     |> std/io:print.ln("==CAND==")
     |> libs/nativelayout:nl.init(width: 900, height: 640)
@@ -166,8 +171,13 @@ libs/clay:init(width: 900, height: 640)
                             | then |> libs/nativelayout:nl.el.text(t: nt,
                                 tx: if (s.txc == 0) "the quick brown fox jumps over the lazy dog" else if (s.txc == 1) "lorem ipsum dolor sit" else if (s.txc == 2) "ab cd" else "w",
                                 s.fs, s.r, s.g, s.b, s.a, s.eid)
+                        |> if (s.kind == 4)
+                            | then |> libs/nativelayout:nl.el.open(t: nt)
+                                |> libs/nativelayout:nl.el.custom(t: nt, s.wk, s.w, s.hk, s.h,
+                                    data: s.eid + 9000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr)
+                                |> libs/nativelayout:nl.el.close(t: nt)
             | nsolved cls |> libs/nativelayout:nl.each(cl: cls)
-                ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
+                ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
                 | drained |> libs/nativelayout:nl.drop(cl: nh)
     | err ne |> std/io:print.ln("nl init failed: {{ ne:s }}")
     |> std/store:stored { world.mut: 1 }
@@ -200,8 +210,13 @@ libs/clay:init(width: 900, height: 640)
                         | then |> libs/clay:el.text(t,
                             tx: if (s.txc == 0) "the quick brown fox jumps over the lazy dog" else if (s.txc == 1) "lorem ipsum dolor sit" else if (s.txc == 2) "ab cd" else "w",
                             s.fs, s.r, s.g, s.b, s.a, eid: s.eid + world.mut * 100000)
+                    |> if (s.kind == 4)
+                        | then |> libs/clay:el.open(t)
+                            |> libs/clay:el.custom(t, s.wk, w: if (s.wk == 2) s.w else s.w + @as(f64, @floatFromInt(world.mut)), s.hk, s.h,
+                                data: s.eid + 9000 + world.mut * 7, s.fl, s.fx, s.fy, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr)
+                            |> libs/clay:el.close(t)
         | solved cls |> libs/clay:each(cl: cls)
-            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
+            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} tx={{ rc.tx:s }}")
             | drained |> _
     |> libs/clay:drop(cl: h)
 | err e |> std/io:print.ln("clay init failed: {{ e:s }}")

@@ -36,10 +36,15 @@ RADIUS ×4 (crtl/crtr/crbl/crbr → decl.cornerRadius — first CmdView
 projection growth: ctl/ctr/cbl/cbr fields + a `cr=` line key; `each`
 reads rectangle.cornerRadius for non-text kinds — image/custom share
 the {color, radius} prefix, text is guarded to 0; comparator compares
-cr= on kinds 1/4 and now counts kind-7 c= as a real aliased payload).
+cr= on kinds 1/4 and now counts kind-7 c= as a real aliased payload),
+CUSTOM (kind 9 — el.custom/nl.el.custom carry `data` into
+decl.custom.customData / El.cd; emitted after IMAGE, before
+SCISSOR_START; CmdView +1 field `cd`; comparator compares d=
+unconditionally and extends c=/cr= to kind 9 — custom shares the
+{color, radius} union head for real).
 ABSENT,
-additive ports — borders (+betweenChildren), CUSTOM
-commands, aspectRatio, letterSpacing/
+additive ports — borders (+betweenChildren),
+aspectRatio, letterSpacing/
 lineHeight/fontId, wrap NEWLINES/NONE, textAlignment, attachPoints 9×9,
 attachTo PARENT/clipTo, expand, zIndex, pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
@@ -85,6 +90,15 @@ diverge. MUT gained a crtr corruption alongside the pad/gap/w/eid
 axes. Receipt: GATE PASS — CAND==REF over 539 cmds; MUT rejected
 with 1632 divergences. smoke, gallery, gallery_comp, bench_solvers
 green.
+
+growth 2026-10-21 — CUSTOM commands: fourth capability cycle, first in
+the oshun home. el.custom + nl.el.custom (full el.img decl shape, data →
+customData/El.cd); nl emits kind 9 between IMAGE and SCISSOR_START,
+matching clay.h:3040. Corpus: kind space redrawn 50/20/10/10/10
+(panel/clip/img/custom/text); MUT corrupts data (+mut*7) and w.
+Receipt: GATE PASS — CAND==REF over 539 cmds (139 kind-9 lines across
+the three sections); MUT rejected with 1581 divergences. smoke,
+gallery, gallery_comp, bench_solvers (ReleaseFast), folder_snap green.
 
 landmine found 2026-10-20 — nl first lived as `~part native` of libs/clay.
 ~parts elaborate EAGERLY into every consumer: gallery_comp (never touches
