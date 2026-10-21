@@ -1,0 +1,12 @@
+name: capability-added
+kind: inferred
+shape: categorical
+face: in
+membrane: false
+note: the platform surface gained a capability that did not exist —
+  a new verb, a new host service, a declaration the runtime now honors.
+  Distinct from repudiated-partial (a held belief was wrong) and
+  capability-growth (the clay solver's parity surface widened): here
+  nothing was measured or repudiated — the surface is simply larger.
+  Minted by the std/build:app probe commit (embedded Info.plist →
+  AppKit presents a real app name).
