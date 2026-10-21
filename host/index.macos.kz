@@ -131,11 +131,12 @@ pub fn activateRegular() Id {
 }
 
 // ============================================================================
-// Tray mailbox — the ObjC ↔ Koru boundary for host-chrome events. ObjC IMPs
-// are plain C functions: they cannot call Koru effect arms, so they PUSH
-// into this ring, and a pump — `frames` in metal, `host.run` here — drains
-// it and dispatches. Window input rides its own ring in metal; each module
-// owns the vocabulary its sources produce.
+// Chrome mailbox — the ObjC ↔ Koru boundary for host-chrome events. ObjC
+// IMPs are plain C functions: they cannot call Koru effect arms, so they
+// PUSH into this ring, and a pump — `frames` in metal, `host.run` here —
+// drains it and dispatches. Window input rides its own ring in metal;
+// chrome verbs (tray, menu, later dialogs/notifications) share ONE ring
+// so a pump's drain site never changes as the vocabulary grows.
 // ============================================================================
 
 // A status-item event. `tray` is the tray.new registration slot, `tag` the
@@ -148,26 +149,51 @@ pub const TrayActionData = struct {
     action: []const u8,
 };
 
-var tray_ev_buf: [64]TrayActionData = undefined;
-// Char backing for the action string — a parallel ring, same wrap
-// semantics as the view's ev_chars.
-var tray_ev_actions: [64][64]u8 = undefined;
-var tray_ev_head: usize = 0;
-var tray_ev_tail: usize = 0;
+// A main-menu event — tag/action straight from the NSMenuItem, same
+// matching contract as tray (integer `when` on tag).
+pub const MenuActionData = struct {
+    tag: i64,
+    action: []const u8,
+};
 
-fn trayPushAction(tray: i64, tag: i64, action: []const u8) void {
-    const next = (tray_ev_tail + 1) % tray_ev_buf.len;
-    if (next == tray_ev_head) return;
-    const n = @min(action.len, tray_ev_actions[0].len);
-    @memcpy(tray_ev_actions[tray_ev_tail][0..n], action[0..n]);
-    tray_ev_buf[tray_ev_tail] = .{ .tray = tray, .tag = tag, .action = tray_ev_actions[tray_ev_tail][0..n] };
-    tray_ev_tail = next;
+pub const HostEvent = union(enum) {
+    tray: TrayActionData,
+    menu: MenuActionData,
+};
+
+var ev_buf: [64]HostEvent = undefined;
+// Char backing for action strings — a parallel ring, same wrap semantics
+// as the view's ev_chars.
+var ev_actions: [64][64]u8 = undefined;
+var ev_head: usize = 0;
+var ev_tail: usize = 0;
+
+fn pushEvent(e: HostEvent, action_src: []const u8) void {
+    const next = (ev_tail + 1) % ev_buf.len;
+    if (next == ev_head) return;
+    const n = @min(action_src.len, ev_actions[0].len);
+    @memcpy(ev_actions[ev_tail][0..n], action_src[0..n]);
+    var ev = e;
+    switch (ev) {
+        .tray => |*t| t.action = ev_actions[ev_tail][0..n],
+        .menu => |*m| m.action = ev_actions[ev_tail][0..n],
+    }
+    ev_buf[ev_tail] = ev;
+    ev_tail = next;
 }
 
-pub fn trayPopEvent() ?TrayActionData {
-    if (tray_ev_head == tray_ev_tail) return null;
-    const e = tray_ev_buf[tray_ev_head];
-    tray_ev_head = (tray_ev_head + 1) % tray_ev_buf.len;
+fn trayPushAction(tray: i64, tag: i64, action: []const u8) void {
+    pushEvent(.{ .tray = .{ .tray = tray, .tag = tag, .action = &.{} } }, action);
+}
+
+fn menuPushAction(tag: i64, action: []const u8) void {
+    pushEvent(.{ .menu = .{ .tag = tag, .action = &.{} } }, action);
+}
+
+pub fn popEvent() ?HostEvent {
+    if (ev_head == ev_tail) return null;
+    const e = ev_buf[ev_head];
+    ev_head = (ev_head + 1) % ev_buf.len;
     return e;
 }
 
@@ -197,6 +223,18 @@ fn traySlotFor(recv: Id) ?usize {
     return null;
 }
 
+// tag + representedObject off the clicked NSMenuItem — shared by every
+// chrome click IMP. The action slice points into `tmp`; the ring push
+// copies it before the IMP returns.
+fn readTagAndAction(sender: Id, tmp: *[64]u8) struct { tag: i64, action: []const u8 } {
+    var action: []const u8 = &.{};
+    const robj = send(Id, sender, sel("representedObject"));
+    if (robj != null and CFStringGetCString(robj, tmp, tmp.len, cf.kCFStringEncodingUTF8)) {
+        action = tmp[0..std.mem.len(@as([*:0]u8, @ptrCast(tmp)))];
+    }
+    return .{ .tag = send(i64, sender, sel("tag")), .action = action };
+}
+
 fn impStatusItemClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
     _ = _s;
     _ = sender;
@@ -207,14 +245,35 @@ fn impStatusItemClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
 fn impMenuItemClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
     _ = _s;
     const slot = traySlotFor(recv) orelse return;
-    const tag = send(i64, sender, sel("tag"));
-    var action: []const u8 = &.{};
     var tmp: [64]u8 = undefined;
-    const robj = send(Id, sender, sel("representedObject"));
-    if (robj != null and CFStringGetCString(robj, &tmp, tmp.len, cf.kCFStringEncodingUTF8)) {
-        action = tmp[0..std.mem.len(@as([*:0]u8, @ptrCast(&tmp)))];
-    }
-    trayPushAction(@intCast(slot), tag, action);
+    const e = readTagAndAction(sender, &tmp);
+    trayPushAction(@intCast(slot), e.tag, e.action);
+}
+
+// Main-menu clicks land on a single shared target — unlike trays, a
+// MenuActionData carries no source slot, so one instance serves every
+// menu item in the process.
+fn impMenuClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
+    _ = recv;
+    _ = _s;
+    var tmp: [64]u8 = undefined;
+    const e = readTagAndAction(sender, &tmp);
+    menuPushAction(e.tag, e.action);
+}
+
+var menu_class: ?objc.Class = null;
+var menu_target: ?Id = null;
+
+fn ensureMenuTarget() ?Id {
+    if (menu_target) |t| return t;
+    const sup: objc.Class = @ptrCast(cls("NSObject"));
+    const c = objc.objc_allocateClassPair(sup, "KoruMenuTarget", 0) orelse return null;
+    _ = objc.class_addMethod(c, sel("menuItemClicked:"), @ptrCast(&impMenuClicked), "v@:@");
+    objc.objc_registerClassPair(c);
+    menu_class = c;
+    const t = send(Id, send(Id, @as(Id, @ptrCast(c)), sel("alloc")), sel("init"));
+    menu_target = t;
+    return t;
 }
 
 fn ensureTrayClass() ?objc.Class {
@@ -385,6 +444,136 @@ fn ensureMenu(tray: *Tray) void {
 }
 
 // ============================================================================
+// Main menu — the second host verb. macOS shape: NSApp.mainMenu holds one
+// NSMenuItem per bar heading ("App", "File", "Edit"), each carrying a
+// submenu NSMenu of real items. Same target/action/tag/representedObject
+// mechanics as the tray — one shared KoruMenuTarget, one chrome ring.
+// menu.new grants <ready>; menu.remove is the only consumer. Bars are
+// plain <ready> borrows — remove frees them with the menu.
+// ============================================================================
+
+pub const Menu = struct {
+    m: Id,
+};
+
+pub const MenuBar = struct {
+    sub: Id,
+};
+
+const MAX_BARS = 32;
+var menu_bars: [MAX_BARS]*MenuBar = undefined;
+var menu_bar_count: usize = 0;
+
+// A main menu implies a regular app — activateRegular upgrades the
+// policy and replaces the empty scaffolding menu with ours.
+~pub tor menu.new {}
+| menu *Menu<ready!>
+| err string
+
+~proc menu.new|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    const app = activateRegular();
+    _ = ensureMenuTarget() orelse {
+        return .{ .err = "host: KoruMenuTarget class registration failed" };
+    };
+    const m = send(Id, send(Id, cls("NSMenu"), sel("alloc")), sel("init"));
+    send1(void, Id, app, sel("setMainMenu:"), m);
+    const t = std.heap.page_allocator.create(Menu) catch @panic("host: OOM allocating Menu token");
+    t.* = .{ .m = m };
+    return .{ .menu = t };
+}
+
+// One bar heading — its title shows in the menu bar; items attach to
+// the submenu it owns.
+~pub tor menu.bar { menu: *Menu<ready>, title: string }
+| bar *MenuBar<ready>
+| err string
+
+~proc menu.bar|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    if (menu_bar_count >= MAX_BARS) {
+        return .{ .err = "host: bar table full" };
+    }
+    var tbuf: [256]u8 = undefined;
+    const titleStr = cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8);
+    const sub = send(Id, send(Id, cls("NSMenu"), sel("alloc")), sel("init"));
+    send1(void, Id, sub, sel("setTitle:"), @as(Id, @ptrCast(@constCast(titleStr))));
+    const heading = send(Id, send(Id, cls("NSMenuItem"), sel("alloc")), sel("init"));
+    send1(void, Id, heading, sel("setTitle:"), @as(Id, @ptrCast(@constCast(titleStr))));
+    send1(void, Id, heading, sel("setSubmenu:"), sub);
+    send1(void, Id, menu.m, sel("addItem:"), heading);
+    send(void, heading, sel("release"));
+    send(void, sub, sel("release"));
+    const b = std.heap.page_allocator.create(MenuBar) catch @panic("host: OOM allocating MenuBar token");
+    b.* = .{ .sub = sub };
+    menu_bars[menu_bar_count] = b;
+    menu_bar_count += 1;
+    return .{ .bar = b };
+}
+
+// One menu entry — `key` is the keyEquivalent: "q" yields Cmd-Q for
+// free (Command is the default modifier mask). `action` rides into
+// MenuActionData as representedObject; `tag` is the integer matcher.
+~pub tor menu.item { bar: *MenuBar<ready>, label: string, key: string, action: string, tag: i64 }
+
+~proc menu.item|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    var lbuf: [256]u8 = undefined;
+    var abuf: [64]u8 = undefined;
+    var kbuf: [16]u8 = undefined;
+    const labelStr = cf.CFStringCreateWithCString(null, cstr(label, &lbuf), cf.kCFStringEncodingUTF8);
+    const actStr = cf.CFStringCreateWithCString(null, cstr(action, &abuf), cf.kCFStringEncodingUTF8);
+    const keyStr = cf.CFStringCreateWithCString(null, cstr(key, &kbuf), cf.kCFStringEncodingUTF8);
+    const mi = send3(
+        Id, Id, SEL, Id,
+        send(Id, cls("NSMenuItem"), sel("alloc")),
+        sel("initWithTitle:action:keyEquivalent:"),
+        @as(Id, @ptrCast(@constCast(labelStr))), sel("menuItemClicked:"), @as(Id, @ptrCast(@constCast(keyStr))),
+    );
+    send1(void, Id, mi, sel("setTarget:"), menu_target.?);
+    send1(void, Id, mi, sel("setRepresentedObject:"), @as(Id, @ptrCast(@constCast(actStr))));
+    send1(void, i64, mi, sel("setTag:"), tag);
+    send1(void, Id, bar.sub, sel("addItem:"), mi);
+    send(void, mi, sel("release"));
+}
+
+~pub tor menu.sep { bar: *MenuBar<ready> }
+
+~proc menu.sep|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    const sep = send(Id, cls("NSMenuItem"), sel("separatorItem"));
+    send1(void, Id, bar.sub, sel("addItem:"), sep);
+}
+
+~pub tor menu.remove { menu: *Menu<!ready> }
+
+~proc menu.remove|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    send1(void, Id, ensureApp(), sel("setMainMenu:"), @as(Id, null));
+    // The menu retains its headings, they retain their submenus — one
+    // release takes the whole tree.
+    send(void, menu.m, sel("release"));
+    for (0..menu_bar_count) |i| {
+        std.heap.page_allocator.destroy(menu_bars[i]);
+    }
+    menu_bar_count = 0;
+    std.heap.page_allocator.destroy(menu);
+}
+
+// Automation: a synthesized menu action enters the SAME ring the IMP
+// writes — verifies ring -> arm dispatch without AX trust.
+~pub tor menu.action { tag: i64, action: string }
+
+~proc menu.action|zig {
+    menuPushAction(tag, action);
+}
+
+// ============================================================================
 // host.run — the windowless pump. AppKit still needs its event loop
 // serviced for a menu to open or a click to arrive, so the shape is
 // frames-minus-render: acquire NSApp, pump pending events, drain the
@@ -393,6 +582,7 @@ fn ensureMenu(tray: *Tray) void {
 
 ~pub tor host.run { count: ?i32 }
 ! ?tray-action libs/host:TrayActionData
+! ?menu-action libs/host:MenuActionData
 | done
 
 ~proc host.run|zig {
@@ -414,8 +604,11 @@ fn ensureMenu(tray: *Tray) void {
         }
         $mod.send(void, app, $mod.sel("updateWindows"));
         $mod.serviceRunLoop();
-        while ($mod.trayPopEvent()) |tev| {
-            tray_action(tev);
+        while ($mod.popEvent()) |hev| {
+            switch (hev) {
+                .tray => |td| tray_action(td),
+                .menu => |md| menu_action(md),
+            }
         }
         if ($mod.should_quit) break;
         $mod.std.Thread.sleep(16 * $mod.std.time.ns_per_ms);

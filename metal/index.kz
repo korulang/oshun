@@ -1599,6 +1599,7 @@ fn buildPipelines(device: Id) error{
 ! ?mouse-drag libs/metal:MouseData
 ! ?scroll libs/metal:ScrollData
 ! ?tray-action libs/host:TrayActionData
+! ?menu-action libs/host:MenuActionData
 ! ?close
 | done *Window<active!>
 
@@ -1643,8 +1644,11 @@ fn buildPipelines(device: Id) error{
                 .scroll => |s| scroll(s),
             }
         }
-        while ($mod.H.trayPopEvent()) |tev| {
-            tray_action(tev);
+        while ($mod.H.popEvent()) |hev| {
+            switch (hev) {
+                .tray => |td| tray_action(td),
+                .menu => |md| menu_action(md),
+            }
         }
         if ($mod.H.should_quit) break;
         if (!$mod.send(bool, win.win, $mod.sel("isVisible"))) {

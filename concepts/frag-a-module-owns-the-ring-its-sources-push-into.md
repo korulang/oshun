@@ -26,6 +26,9 @@ drain-then-render, and `should_quit` lives with the pump contract,
 not with any one ring.
 
 Corollary for the verbs that come next: a new event *vocabulary*
-belongs beside the module that produces it — a future dialog or
-notification ring lands in host next to `tray_ev_buf`, not in a
-shared "events" type both halves would have to import.
+belongs beside the module that produces it — but the ring's grain is
+the module, not the verb. When `menu` landed, it joined host's ring
+as a `HostEvent` union member rather than getting its own buffer: one
+ring per module means a pump's drain site is a single `while` over a
+`switch` that grows arms, not a growing list of rings to poll.
+Vocabulary is union cases; ownership is the module boundary.
