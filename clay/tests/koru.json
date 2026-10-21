@@ -1,0 +1,8 @@
+{
+  "name": "clay-tests",
+  "version": "0.1.0",
+  "paths": {
+    "libs": "../..",
+    "oshun": "../../../oshun"
+  }
+}
