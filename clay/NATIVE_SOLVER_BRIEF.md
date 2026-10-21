@@ -344,6 +344,34 @@ is always {0,0,W,H} — index-keying and Clay's id-keying can never
 diverge there. (Clay's anonymous ids are HashNumber(siblingIndex,
 parentId) — position-derived hashes, same staleness class.)
 
+CONSUMER-PATH PIXEL PARITY (2026-10-21 — the receipt the census
+demanded): `clay/tests/spec_snap_nl.k` is the spec_snap twin with nl
+swapped in for Clay — same markup→spec→`ui`-shaped declaration walk
+(the ui:panel lowering inlined: dock/sizeKind/axis words → codes),
+same `nl.each` drain, same `draw.rect` → Metal → BMP at frame 30.
+First run FAILED the oracle: 585,360 differing bytes across 328 rows;
+the three `fl=1` floating subtrees rendered as solid white boxes —
+positions and sizes correct, colors and children visibly absent.
+Command streams were byte-identical across all 45 frames; literal-color
+probes (red → red, black → black) proved geometry and the render path
+fine. The emitted Zig named it: `nl.each`'s proc body iterates
+`for (cl.cmds.items) |*rc|` and, inlined into consumer scope, the
+`| then |>` branch's `rc.r` resolved to that raw `Cmd` (0-255 channels,
+which the shader clamps to opaque white) while the `if` condition and
+print correctly bound the yielded `CmdView`. `clay.each` uses `__rc`
+and never collides. Fix: `nl.each` loop var `rc` → `__rc` — the
+hygiene convention was load-bearing, not stylistic. Result: clean
+binaries produce BYTE-IDENTICAL BMPs (`cmp` clean at 4,096,054 bytes).
+Gate re-run after the rename: CAND==REF 2106 / CAND2==REF2 2092 /
+MUT rejected 3293. The asymmetry (`if`/print bound the yield, `then`
+bound the proc-local) is a koru compiler scope-resolution wart worth
+reporting — hygiene removes the trigger, not the wart. See
+concepts/frag-a-proc-body-name-is-a-consumer-facing-binding.md.
+Lesson for the ledger: command-stream parity does not imply paint
+parity — the divergence lived below the projection, in what name the
+compiler resolved the draw's arguments to. The pixel oracle is now a
+standing consumer-path check alongside the stream gate.
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,
@@ -624,6 +652,7 @@ Known traps, ranked:
 | `clay/tests/bench_boxes_gate.k` | gate candidate — prints instance stream |
 | `clay/tests/bench_boxes_cmp.py` | comparator, 0.005pt/0.002 tolerances |
 | `clay/tests/spec_snap.k`, `spec_tree.k` | pixel oracles (byte-identical BMP requirement) |
+| `clay/tests/spec_snap_nl.k` | consumer-path pixel oracle: spec_snap twin through nl (byte-identical BMP vs spec_snap) |
 | `metal/index.kz` | draw ops, instance format (kind 0 quad/1 text/2 shadow/3 image), `frames|zig` pump |
 | nanoui clone `/tmp/nanoui-check` | `hillclimb/` harness (may need re-clone — /tmp is scratch); `src/ui/layout.zig` = the 318-line reference |
 
