@@ -1,0 +1,13 @@
+{
+  "name": "oshun",
+  "palette": {
+    "base": "#11111b",
+    "text": "#cdd6f4",
+    "surface": "#313244",
+    "accent": "#89b4fa"
+  },
+  "background": null,
+  "sound": "B",
+  "glyph": "●",
+  "avatar": null
+}
