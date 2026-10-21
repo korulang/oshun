@@ -41,10 +41,14 @@ CUSTOM (kind 9 — el.custom/nl.el.custom carry `data` into
 decl.custom.customData / El.cd; emitted after IMAGE, before
 SCISSOR_START; CmdView +1 field `cd`; comparator compares d=
 unconditionally and extends c=/cr= to kind 9 — custom shares the
-{color, radius} union head for real).
+{color, radius} union head for real), ASPECT RATIO (ar →
+decl.aspectRatio / El.ar; chained two-directional solve — close-time
+fill, post-X h=w/ar + hmx lock, post-Y w=ar·h, mirroring
+Clay__UpdateAspectRatioBox's four call sites; MUT adds +mut to ar on
+every element).
 ABSENT,
 additive ports — borders (+betweenChildren),
-aspectRatio, letterSpacing/
+letterSpacing/
 lineHeight/fontId, wrap NEWLINES/NONE, textAlignment, attachPoints 9×9,
 attachTo PARENT/clipTo, expand, zIndex, pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
@@ -99,6 +103,27 @@ matching clay.h:3040. Corpus: kind space redrawn 50/20/10/10/10
 Receipt: GATE PASS — CAND==REF over 539 cmds (139 kind-9 lines across
 the three sections); MUT rejected with 1581 divergences. smoke,
 gallery, gallery_comp, bench_solvers (ReleaseFast), folder_snap green.
+
+growth 2026-10-21 — aspectRatio: fifth capability cycle, first to
+change solver MATH rather than command shape, and the first to find a
+bug in the oracle. el.cfg/el.clip/el.img/el.custom + nl.el.* gained
+`ar`; nl grew an `aspects` index buffer + updAspect and mirrors Clay's
+call sites (close-time, percent-expansion, post-wrap h=w/ar + hmx
+lock, post-Y w=ar·h). THE FIND: enabling ar in the corpus wedged
+Clay__SizeContainersAlongAxis's shrink loop — a negative child dim
+(pct>1 chains or ar propagation) never matches `largest` (init 0), so
+widthToAdd computes 0 and sizeToDistribute never moves — a real
+non-termination bug present in upstream v0.14 main, reachable without
+ar too. Vendored clay.h now carries a marked LOCAL PATCH: a
+no-progress guard (break when an iteration can't move
+sizeToDistribute) in both shrink and grow loops — semantics-identical
+on every input upstream actually terminates on. nl's mirrored loops
+got the same guard. Corpus: ar drawn 0/~0.5-3.0; MUT corrupts ar on
+every element. Receipt: GATE PASS — CAND==REF over 589 cmds; MUT
+rejected with 1466 divergences; smoke, gallery, gallery_comp,
+bench_solvers, folder_snap green. Operational note: zig caches the
+clay_impl.c TU without noticing clay.h edits — bump the .c file when
+iterating on the header.
 
 landmine found 2026-10-20 — nl first lived as `~part native` of libs/clay.
 ~parts elaborate EAGERLY into every consumer: gallery_comp (never touches

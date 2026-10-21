@@ -2409,6 +2409,11 @@ void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArr
                     }
                     // Scrolling containers preferentially compress before others
                     while (sizeToDistribute < -CLAY__EPSILON && resizableContainerBuffer.length > 0) {
+                        // LOCAL PATCH (oshun): no-progress guard. If an iteration moves
+                        // nothing (e.g. all resizable children non-positive, or float
+                        // addition can no longer represent the delta) the loop cannot
+                        // converge upstream; break instead of spinning forever.
+                        float sizeToDistributeBefore = sizeToDistribute;
                         float largest = 0;
                         float secondLargest = 0;
                         float widthToAdd = sizeToDistribute;
@@ -2442,6 +2447,7 @@ void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArr
                                 sizeToDistribute -= (*childSize - previousWidth);
                             }
                         }
+                        if (sizeToDistribute == sizeToDistributeBefore) { break; } // LOCAL PATCH (oshun)
                     }
                 // The content is too small, allow SIZING_GROW containers to expand
                 } else if (sizeToDistribute > 0 && growContainerCount > 0) {
@@ -2453,6 +2459,8 @@ void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArr
                         }
                     }
                     while (sizeToDistribute > CLAY__EPSILON && resizableContainerBuffer.length > 0) {
+                        // LOCAL PATCH (oshun): no-progress guard (see shrink loop above).
+                        float sizeToDistributeBefore = sizeToDistribute;
                         float smallest = CLAY__MAXFLOAT;
                         float secondSmallest = CLAY__MAXFLOAT;
                         float widthToAdd = sizeToDistribute;
@@ -2487,6 +2495,7 @@ void Clay__SizeContainersAlongAxis(bool xAxis, float deltaTime, Clay__int32_tArr
                                 sizeToDistribute -= (*childSize - previousWidth);
                             }
                         }
+                        if (sizeToDistribute == sizeToDistributeBefore) { break; } // LOCAL PATCH (oshun)
                     }
                 }
             // Sizing along the non layout axis ("off axis")

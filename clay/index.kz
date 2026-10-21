@@ -158,6 +158,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc el.cfg|zig {
@@ -180,6 +181,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.backgroundColor = .{ .r = @floatCast(r), .g = @floatCast(g), .b = @floatCast(b), .a = @floatCast(a) };
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
+    decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -203,6 +205,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc el.img|zig {
@@ -216,6 +219,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.image = .{ .imageData = @ptrFromInt(@as(usize, @intCast(data))) };
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
+    decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -239,6 +243,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc el.custom|zig {
@@ -252,6 +257,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.custom = .{ .customData = @ptrFromInt(@as(usize, @intCast(data))) };
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
+    decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -295,6 +301,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     r: f64, g: f64, b: f64, a: f64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -317,6 +324,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.backgroundColor = .{ .r = @floatCast(r), .g = @floatCast(g), .b = @floatCast(b), .a = @floatCast(a) };
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
+    decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
     decl.clip = .{
         .horizontal = horiz != 0,
         .vertical = vert != 0,

@@ -74,6 +74,7 @@ pub const Native = struct {
     bfs: std.ArrayListUnmanaged(i32) = .{},
     rbuf: std.ArrayListUnmanaged(i32) = .{},
     texts: std.ArrayListUnmanaged(i32) = .{},
+    aspects: std.ArrayListUnmanaged(i32) = .{},
     words: std.ArrayListUnmanaged(Wd) = .{},
     lines: std.ArrayListUnmanaged(Wl) = .{},
     cmds: std.ArrayListUnmanaged(Cmd) = .{},
@@ -129,6 +130,7 @@ const El = struct {
     oy: f32 = 0,
     img: usize = 0,
     cd: usize = 0,
+    ar: f32 = 0,
     ud: usize = 0,
     is_text: bool = false,
     tx: []const u8 = "",
@@ -217,6 +219,19 @@ fn setSizing(e: *El, xAxis: bool, kind: i64, v: f64) void {
     }
 }
 
+// Clay__UpdateAspectRatioBox — fill a zero dim from the other at ar.
+// Called at the same three sites clay.h fires it: end of closeEl, and
+// after each percent expansion inside sizeAxis.
+fn updAspect(e: *El) void {
+    if (e.ar != 0) {
+        if (e.dw == 0 and e.dh != 0) {
+            e.dw = e.dh * e.ar;
+        } else if (e.dw != 0 and e.dh == 0) {
+            e.dh = e.dw * (1.0 / e.ar);
+        }
+    }
+}
+
 fn closeEl(n: *Native) void {
     const idx = n.stack.items[n.stack.items.len - 1];
     const e = &n.els.items[@intCast(idx)];
@@ -265,6 +280,7 @@ fn closeEl(n: *Native) void {
         e.dh = fClamp(e.dh, e.hmn, e.hmx);
         e.mh = fClamp(e.mh, e.hmn, e.hmx);
     } else e.dh = 0;
+    updAspect(e);
 
     n.stack.items.len -= 1;
     if (n.stack.items.len > 1) {
@@ -401,6 +417,9 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                 } else if (ce.nc > 0) {
                     n.bfs.append(alloc, ci) catch @panic("nl: OOM");
                 }
+                if (xAxis and !ce.is_text and ce.ar != 0) {
+                    n.aspects.append(alloc, ci) catch @panic("nl: OOM");
+                }
                 if (ck != PCT and ck != FIX) {
                     n.rbuf.append(alloc, ci) catch @panic("nl: OOM");
                 }
@@ -423,6 +442,7 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                     const cs = dim(ce, xAxis);
                     cs.* = (parentSize - totalPadGaps) * smin(ce, xAxis);
                     if (along) inner += cs.*;
+                    updAspect(ce);
                 }
             }
             if (along) {
@@ -431,6 +451,9 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                     if (clipsAxis(p, xAxis)) continue;
                     // Compress resizable children, largest first.
                     while (leftover < -EPS and n.rbuf.items.len > 0) {
+                        // No-progress guard, mirroring the clay.h LOCAL PATCH: an
+                        // iteration that moves nothing can never converge.
+                        const leftoverBefore = leftover;
                         var largest: f32 = 0;
                         var secondLargest: f32 = 0;
                         var wta = leftover;
@@ -466,6 +489,7 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                             }
                             i += 1;
                         }
+                        if (leftover == leftoverBefore) break;
                     }
                 } else if (leftover > 0 and growCount > 0) {
                     var i: usize = 0;
@@ -477,6 +501,7 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                     }
                     // Distribute leftover to grow children, smallest first.
                     while (leftover > EPS and n.rbuf.items.len > 0) {
+                        const leftoverBefore = leftover;
                         var smallest: f32 = MAXF;
                         var secondSmallest: f32 = MAXF;
                         var wta = leftover;
@@ -512,6 +537,7 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                             }
                             i += 1;
                         }
+                        if (leftover == leftoverBefore) break;
                     }
                 }
             } else {
@@ -775,10 +801,23 @@ fn solve(n: *Native) void {
     n.texts.clearRetainingCapacity();
     n.lines.clearRetainingCapacity();
     n.cmds.clearRetainingCapacity();
+    n.aspects.clearRetainingCapacity();
     sizeAxis(n, true);
     wrapTexts(n);
+    // clay.h: scale vertical heights by aspect ratio, lock via max —
+    // after text wrap, before height propagation.
+    for (n.aspects.items) |ai| {
+        const e = &n.els.items[@intCast(ai)];
+        e.dh = e.dw * (1.0 / e.ar);
+        e.hmx = e.dh;
+    }
     propagateHeights(n);
     sizeAxis(n, false);
+    // clay.h: scale horizontal widths from the now-final heights.
+    for (n.aspects.items) |ai| {
+        const e = &n.els.items[@intCast(ai)];
+        e.dw = e.ar * e.dh;
+    }
     // All roots z=0 → stable order is declaration order already.
     emitCommands(n);
 }
@@ -870,6 +909,7 @@ fn solve(n: *Native) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc nl.el.cfg|zig {
@@ -901,6 +941,7 @@ fn solve(n: *Native) void {
     e.ctr = @floatCast(crtr);
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
+    e.ar = @floatCast(ar);
     e.ud = @intCast(@as(u64, @bitCast(eid)));
     if (fl != 0) {
         e.fl = 1;
@@ -918,6 +959,7 @@ fn solve(n: *Native) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc nl.el.img|zig {
@@ -936,6 +978,7 @@ fn solve(n: *Native) void {
     e.ctr = @floatCast(crtr);
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
+    e.ar = @floatCast(ar);
     if (fl != 0) {
         e.fl = 1;
         e.fx = @floatCast(fx);
@@ -955,6 +998,7 @@ fn solve(n: *Native) void {
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
 }
 
 ~proc nl.el.custom|zig {
@@ -973,6 +1017,7 @@ fn solve(n: *Native) void {
     e.ctr = @floatCast(crtr);
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
+    e.ar = @floatCast(ar);
     if (fl != 0) {
         e.fl = 1;
         e.fx = @floatCast(fx);
@@ -988,6 +1033,7 @@ fn solve(n: *Native) void {
     r: f64, g: f64, b: f64, a: f64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
+    ar: f64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -1015,6 +1061,7 @@ fn solve(n: *Native) void {
     e.ctr = @floatCast(crtr);
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
+    e.ar = @floatCast(ar);
     e.ch = horiz != 0;
     e.cv = vert != 0;
     e.ox = @floatCast(ox);
