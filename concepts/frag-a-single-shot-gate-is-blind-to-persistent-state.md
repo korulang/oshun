@@ -22,23 +22,38 @@ single-shot gate cannot see:
   emitted box. Attach positions shift (observed: x −104 → 346 on a
   z=−4 subtree), scissor culling changes, and the command stream
   diverges: clay emits 2106 cmds on frame 1 and 2092 on every frame
-  after, while nl (which resolves attach against live element boxes)
-  emits 2106 every frame. CAND==REF holds on the gate because the gate
-  only ever sees frame 1.
+  after. Before the warm pass existed, nl (which resolved attach
+  against live element boxes) emitted 2106 every frame — CAND==REF
+  held only because the gate never saw frame 2.
 
 - `koru_clay_measure` builds a CTFont + CFAttributedString + CTLine
   per call — real typographic shaping, microseconds per call. Clay's
   persistent measure cache makes frames 2+ measure-free; nl's
-  `measureWords` is "Clay__MeasureTextCached minus the cache" and pays
-  ~19ms of Core Text per frame where clay's declaration costs 0.28ms
-  (ReleaseFast). Correctness-identical, cost-divergent — invisible to
-  the gate either way.
+  `measureWords` was "Clay__MeasureTextCached minus the cache" and
+  paid ~19ms of Core Text per frame where clay's declaration costs
+  0.28ms (ReleaseFast). Correctness-identical, cost-divergent —
+  invisible to the gate either way.
 
-The follow-on ruling for this codebase: "nl matches Clay" currently
-means "nl matches Clay's cold-frame stream." Whether the stale-box
-behavior is an upstream quirk to mirror or a bug to refuse is a
-separate question — but it is unreachable by the gate as constituted.
-If multi-frame parity is ever required, the gate needs a warm pass
-(layout the same spec twice, diff frame N vs frame N+1 per solver) or
-an explicit decision that the dialect owns cold semantics only. And
-when a measured claim rides the corpus, say which frame it measured.
+Resolution (same day, this frag's follow-on ruling made concrete): the
+cure is a warm pass, not a verdict on which behavior is right. The
+gate now replays each solver's walk a second time on the same context
+(`==REF2==`/`==CAND2==`); CAND==REF and CAND2==REF2 are both hard
+checks, and each solver's frame1→frame2 drift is reported. With the
+instrument live, mirroring turned out to be bounded, not a rabbit
+hole: one persistent `pboxes` map written at DFS visit (clay.h:3100),
+read at attach and clip-scissor resolution — absent ⇒ zero box (frame
+1), stale ⇒ last frame's box (frame 2+). CAND2==REF2 with identical
+drift (both 2106→2092, same 5516 displaced commands). The measure
+cache was ported the same way — persistent `mcache`/`mwords`, key on
+contents+fontId+fontSize+letterSpacing — and nl's declaration fell
+19.11 → 0.199ms, putting nl ahead of clay on every lap of the full
+gated corpus (~10% on the frame, 0.181/2.080 vs 0.262/2.253,
+ReleaseFast).
+
+The durable belief stands: declare which frame a correctness or
+performance claim measured. What changed is the gate's reach — cold
+AND warm streams are both certified now, and "nl matches Clay" means
+both. The stale-box quirk is mirrored for parity; whether it should
+remain mirrored (it is arguably upstream-undesirable) is a betterment
+decision that can now be taken deliberately, because the instrument
+that would catch regressing from it exists.

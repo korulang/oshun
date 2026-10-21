@@ -142,10 +142,40 @@ if cand_fails:
 if not mut_fails:
     problems.append("MUT is identical to REF — the gate cannot reject a known-wrong candidate")
 
+# Warm-frame sections (REF2/CAND2): same spec re-laid-out on the same
+# context — exercises persistent state. Clay's hashmap carries prior-frame
+# emitted boxes into attach/clip resolution, so it drifts 2106 -> 2092;
+# nl mirrors via pboxes, so CAND2 must equal REF2 (hard check) and
+# CAND-vs-CAND2 drift should match Clay's own drift.
+warm_notes = []
+if "REF2" in secs:
+    r_drift = cmp_rows(ref, secs["REF2"], "ref2") + cmp_errs(errs["REF"], errs["REF2"], "ref2")
+    if r_drift:
+        warm_notes.append(f"REF drift frame1->frame2: {len(ref)} -> {len(secs['REF2'])} cmds, {len(r_drift)} divergences")
+    else:
+        warm_notes.append("REF is frame-stable")
+if "CAND2" in secs:
+    c2_drift = cmp_rows(cand, secs["CAND2"], "cand2") + cmp_errs(errs["CAND"], errs["CAND2"], "cand2")
+    if c2_drift:
+        warm_notes.append(f"CAND drift frame1->frame2: {len(cand)} -> {len(secs['CAND2'])} cmds, {len(c2_drift)} divergences")
+    else:
+        warm_notes.append("CAND is frame-stable")
+    if "REF2" in secs:
+        w_fails = cmp_rows(secs["REF2"], secs["CAND2"], "warm") + cmp_errs(errs["REF2"], errs["CAND2"], "warm")
+        if w_fails:
+            problems.append(f"CAND2 diverges from REF2 ({len(w_fails)} divergences)")
+            problems += ["  " + f for f in w_fails[:8]]
+        else:
+            warm_notes.append("warm parity: CAND2 == REF2")
+
 if problems:
     print(f"GATE FAIL — ref {len(ref)} cmds")
     for p in problems:
         print("  " + p)
+    for n in warm_notes:
+        print("  " + n)
     sys.exit(1)
 print(f"GATE PASS — CAND==REF over {len(ref)} cmds; MUT rejected with {len(mut_fails)} divergences")
+for n in warm_notes:
+    print("  " + n)
 sys.exit(0)

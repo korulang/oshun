@@ -286,17 +286,25 @@ Two findings, both real:
    elements). Without text rows (bench_solvers' panel tree) nl declare
    wins 0.24 vs 0.72 Debug; on the corpus the uncached measure
    dominates. This is a portable gap, not a verdict.
-2. Command counts diverge on WARM frames: clay 2106 on frame 1 then
-   2092 forever; nl 2106 always. Mechanism: `layoutElementsHashMap`
-   items persist across BeginLayout, and emit stamps
-   `hashMapItem->boundingBox` at command time — a floating root sorted
-   before its parent reads the parent's STALE last-frame box (zero on
-   frame 1), shifting attach positions and cull sets. The gate can't
-   see this — it runs the layout once, so CAND==REF certifies
-   cold-frame parity only. See
+2. Command counts diverge on WARM frames — RESOLVED by mirroring.
+   Clay 2106 on frame 1 then 2092 forever; nl was 2106 always.
+   Mechanism: `layoutElementsHashMap` items persist across BeginLayout,
+   and emit stamps `hashMapItem->boundingBox` at DFS visit — a floating
+   root sorted before its parent reads the parent's STALE last-frame
+   box (zero on frame 1), shifting attach positions and cull sets.
+   The gate now has warm sections (`==REF2==`/`==CAND2==`, same spec
+   re-laid-out on the same context): CAND==REF and CAND2==REF2 are both
+   hard checks. nl mirrors via persistent `pboxes` (element index ->
+   emitted box, written at DFS visit, read by attach + clip-scissor
+   resolution; absent -> zero box). Result: nl drifts identically —
+   CAND2==REF2, both 2106->2092 with the same 5516 displaced cmds.
+   Keyed by element index (nl's stand-in for Clay's element id —
+   element-id machinery is still scoped out; identical declaration
+   streams get identical staleness, evolving trees are a noted
+   divergence class). See
    concepts/frag-a-single-shot-gate-is-blind-to-persistent-state.md.
-   nl's frame-stability is arguably the correct behavior; mirroring
-   the stale-box quirk is an open parity decision, not done.
+   Keeping the quirk is a parity choice for now — the frag records it
+   as an open betterment decision.
 Verdict on the full corpus: nl's solver is ~9% faster and the frame
 LOSES by ~8x end-to-end — the measure cache is the whole story.
 FOLLOW-UP (same day): the cache is now ported — nl carries a
@@ -307,7 +315,9 @@ eviction; stale entries are dead weight until the sweep — noted
 divergence in Clay's capacity-ERROR path). Post-port numbers, same
 workload, ReleaseFast: clay 0.268/2.32/~0 vs nl 0.199/2.14/~0 — nl
 ahead on EVERY lap and ~10% on the frame; nl decl fell 19.11 ->
-0.199. Gate still CAND==REF over 2106 cmds, MUT rejected.
+0.199. Post-pboxes numbers: clay 0.262/2.253/~0 cmds 2092 vs nl
+0.181/2.080/~0 cmds 2092 — nl ahead on every lap AND emitting the
+identical warm stream. Gate: CAND==REF and CAND2==REF2, MUT rejected.
 Attribution verified by isolation: same corpus with text rows skipped
 (kind==3 undrawn) gives clay 0.251/0.503/~0 vs nl 0.178/0.379/~0 —
 nl ahead on every lap and ~25% ahead on the frame. The deficit is the

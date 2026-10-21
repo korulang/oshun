@@ -92,6 +92,13 @@ pub const Native = struct {
     // measureTextHashMap living in InitializePersistentMemory.
     mcache: std.AutoHashMapUnmanaged(u64, MEnt) = .{},
     mwords: std.ArrayListUnmanaged(Wd) = .{},
+    // Persistent emitted-box map — survives nl.layout, mirroring Clay's
+    // layoutElementsHashMap boundingBox: read by floating-attach and
+    // clip-scissor resolution, so a parent/clip that hasn't emitted yet
+    // this frame resolves against the PREVIOUS frame's box (or zero on
+    // frame 1). Keyed by element index — nl's stand-in for Clay's element
+    // id; stable for identical declaration streams.
+    pboxes: std.AutoHashMapUnmanaged(i32, [4]f32) = .{},
 };
 
 // Sizing kinds — same ordinals as the clay binding (sizing()).
@@ -194,7 +201,7 @@ const El = struct {
     bx: f32 = 0,
     by: f32 = 0,
     // emitted bounding box (clay.h:3100 — post-expand, written at DFS visit;
-    // floating attach resolution reads this, zero before the parent emits)
+    // mirrored into n.pboxes for attach/clip resolution next frame)
     ebx: f32 = 0,
     eby: f32 = 0,
     ebw: f32 = 0,
@@ -790,11 +797,12 @@ fn emitCommands(n: *Native) void {
             var pw: f32 = 0;
             var ph: f32 = 0;
             if (rent.par >= 0) {
-                const pe = &n.els.items[@intCast(rent.par)];
-                pbx = pe.ebx;
-                pby = pe.eby;
-                pw = pe.ebw;
-                ph = pe.ebh;
+                if (n.pboxes.get(rent.par)) |pb| {
+                    pbx = pb[0];
+                    pby = pb[1];
+                    pw = pb[2];
+                    ph = pb[3];
+                }
             }
             const pcol = @divTrunc(root.fap, 3);
             const prow = @mod(root.fap, 3);
@@ -813,9 +821,9 @@ fn emitCommands(n: *Native) void {
         // using the clip element's emitted bbox (clay.h:2793, :3198) — a clip
         // that hasn't emitted yields a zero box, which is NOT offscreen.
         if (rent.clip >= 0) {
-            const ce = &n.els.items[@intCast(rent.clip)];
-            if (!offscreen(n, ce.ebx, ce.eby, ce.ebw, ce.ebh)) {
-                n.cmds.append(alloc, .{ .kind = 5, .x = ce.ebx, .y = ce.eby, .w = ce.ebw, .h = ce.ebh, .zi = rent.zi }) catch @panic("nl: OOM");
+            const cb = n.pboxes.get(rent.clip) orelse .{ 0, 0, 0, 0 };
+            if (!offscreen(n, cb[0], cb[1], cb[2], cb[3])) {
+                n.cmds.append(alloc, .{ .kind = 5, .x = cb[0], .y = cb[1], .w = cb[2], .h = cb[3], .zi = rent.zi }) catch @panic("nl: OOM");
             }
         }
         const rpadx: f32 = @floatFromInt(root.padl);
@@ -905,6 +913,10 @@ fn emitCommands(n: *Native) void {
             e.eby = eby;
             e.ebw = ebw;
             e.ebh = ebh;
+            // clay.h:3100 — the emitted box lands in the persistent map at
+            // DFS visit; later attach/clip resolutions this frame read it,
+            // next frame's early roots read it stale.
+            n.pboxes.put(alloc, node.el, .{ ebx, eby, ebw, ebh }) catch @panic("nl: OOM");
             const offs = offscreen(n, ebx, eby, ebw, ebh);
             if (!offs) {
                 if (e.is_text) {
@@ -1011,8 +1023,8 @@ fn emitCommands(n: *Native) void {
             }
         }
         if (rent.clip >= 0) {
-            const ce = &n.els.items[@intCast(rent.clip)];
-            if (!offscreen(n, ce.ebx, ce.eby, ce.ebw, ce.ebh)) {
+            const cb = n.pboxes.get(rent.clip) orelse .{ 0, 0, 0, 0 };
+            if (!offscreen(n, cb[0], cb[1], cb[2], cb[3])) {
                 n.cmds.append(alloc, .{ .kind = 6 }) catch @panic("nl: OOM");
             }
         }
@@ -1082,6 +1094,7 @@ fn solve(n: *Native) void {
     cl.lines.deinit($mod.std.heap.page_allocator);
     cl.cmds.deinit($mod.std.heap.page_allocator);
     cl.mcache.deinit($mod.std.heap.page_allocator);
+    cl.pboxes.deinit($mod.std.heap.page_allocator);
     cl.mwords.deinit($mod.std.heap.page_allocator);
     $mod.std.heap.page_allocator.destroy(cl);
 }
