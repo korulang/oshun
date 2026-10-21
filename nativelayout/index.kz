@@ -88,6 +88,10 @@ pub const Native = struct {
     words: std.ArrayListUnmanaged(Wd) = .{},
     lines: std.ArrayListUnmanaged(Wl) = .{},
     cmds: std.ArrayListUnmanaged(Cmd) = .{},
+    // Persistent measure cache — survives nl.layout, mirroring Clay's
+    // measureTextHashMap living in InitializePersistentMemory.
+    mcache: std.AutoHashMapUnmanaged(u64, MEnt) = .{},
+    mwords: std.ArrayListUnmanaged(Wd) = .{},
 };
 
 // Sizing kinds — same ordinals as the clay binding (sizing()).
@@ -208,6 +212,10 @@ const El = struct {
 
 const Wd = struct { s: i32, len: i32, w: f32 };
 const Wl = struct { w: f32, h: f32, s: i32, len: i32 };
+
+// Cache entry: the four outputs measureWords derives from a text's
+// shape, plus the word range in the persistent mwords arena.
+const MEnt = struct { w0: u32, nw: u32, tmin: f32, unw_h: f32, unw_w: f32, has_nl: bool };
 
 const Cmd = struct {
     kind: i64,
@@ -1073,6 +1081,8 @@ fn solve(n: *Native) void {
     cl.words.deinit($mod.std.heap.page_allocator);
     cl.lines.deinit($mod.std.heap.page_allocator);
     cl.cmds.deinit($mod.std.heap.page_allocator);
+    cl.mcache.deinit($mod.std.heap.page_allocator);
+    cl.mwords.deinit($mod.std.heap.page_allocator);
     $mod.std.heap.page_allocator.destroy(cl);
 }
 
@@ -1456,7 +1466,45 @@ fn solve(n: *Native) void {
     e.tal = @min(@max(tal, 0), 2);
     e.ud = @intCast(@as(u64, @bitCast(eid)));
     e.w0 = @intCast(n.words.items.len);
-    $mod.measureWords(n, e);
+    // Cache key covers the measure-affecting config only, matching
+    // HashStringContentsWithConfig: contents + fontId + fontSize +
+    // letterSpacing. lh/wm/tal never shape a measurement.
+    var hash = std.hash.Wyhash.init(0);
+    hash.update(e.tx);
+    var cfgb: [6]u8 = undefined;
+    std.mem.writeInt(u16, cfgb[0..2], e.fs, .little);
+    std.mem.writeInt(u16, cfgb[2..4], e.ls, .little);
+    std.mem.writeInt(u16, cfgb[4..6], e.fid, .little);
+    hash.update(&cfgb);
+    const mkey = hash.final();
+    if (n.mcache.get(mkey)) |hit| {
+        const w0: usize = hit.w0;
+        n.words.appendSlice($mod.alloc, n.mwords.items[w0..w0 + hit.nw]) catch @panic("nl: OOM");
+        e.nw = @intCast(hit.nw);
+        e.tmin = hit.tmin;
+        e.unw_h = hit.unw_h;
+        e.unw_w = hit.unw_w;
+        e.has_nl = hit.has_nl;
+        e.dw = e.unw_w;
+        e.dh = if (e.lh > 0) @floatFromInt(e.lh) else e.unw_h;
+        e.mw = e.tmin;
+        e.mh = e.dh;
+    } else {
+        $mod.measureWords(n, e);
+        const nw: usize = n.words.items.len - @as(usize, @intCast(e.w0));
+        // Bounded like Clay's maxMeasureTextCacheWordCount (16384
+        // words): over cap we sweep and refill rather than refuse —
+        // results are identical, only shaping cost changes. No
+        // generation eviction: stale entries are dead weight until
+        // the sweep.
+        if (n.mwords.items.len + nw > 16384) {
+            n.mcache.clearRetainingCapacity();
+            n.mwords.clearRetainingCapacity();
+        }
+        const mw0: u32 = @intCast(n.mwords.items.len);
+        n.mwords.appendSlice($mod.alloc, n.words.items[@as(usize, @intCast(e.w0))..]) catch @panic("nl: OOM");
+        n.mcache.put($mod.alloc, mkey, .{ .w0 = mw0, .nw = @intCast(nw), .tmin = e.tmin, .unw_h = e.unw_h, .unw_w = e.unw_w, .has_nl = e.has_nl }) catch @panic("nl: OOM");
+    }
     // Attaches to the open parent like a closed child — never opened.
     const p = &n.els.items[@intCast(n.stack.items[n.stack.items.len - 1])];
     p.nc += 1;

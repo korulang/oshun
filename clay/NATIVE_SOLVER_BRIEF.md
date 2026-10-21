@@ -298,8 +298,16 @@ Two findings, both real:
    nl's frame-stability is arguably the correct behavior; mirroring
    the stale-box quirk is an open parity decision, not done.
 Verdict on the full corpus: nl's solver is ~9% faster and the frame
-LOSES by ~8x end-to-end — the measure cache is the whole story, and it
-is the next honest port, not a reason to switch or abandon.
+LOSES by ~8x end-to-end — the measure cache is the whole story.
+FOLLOW-UP (same day): the cache is now ported — nl carries a
+persistent `mcache` (Wyhash over contents+fontId+fontSize+letterSpacing,
+Clay's exact measure-affecting fields) backed by a `mwords` arena
+bounded at Clay's 16384-word cap with sweep-and-refill (no generation
+eviction; stale entries are dead weight until the sweep — noted
+divergence in Clay's capacity-ERROR path). Post-port numbers, same
+workload, ReleaseFast: clay 0.268/2.32/~0 vs nl 0.199/2.14/~0 — nl
+ahead on EVERY lap and ~10% on the frame; nl decl fell 19.11 ->
+0.199. Gate still CAND==REF over 2106 cmds, MUT rejected.
 Attribution verified by isolation: same corpus with text rows skipped
 (kind==3 undrawn) gives clay 0.251/0.503/~0 vs nl 0.178/0.379/~0 —
 nl ahead on every lap and ~25% ahead on the frame. The deficit is the
