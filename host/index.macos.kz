@@ -54,6 +54,23 @@ pub fn serviceRunLoop() void {
     _ = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true);
 }
 
+// One drain of the app's pending NSEvent queue — sendEvent routes each
+// to its window; updateWindows flushes pending display. Shared by both
+// pumps and by the dialog spin loop (a modal dialog is a nested pump).
+pub fn pumpEvents(app: Id) void {
+    while (true) {
+        const ev = send4(
+            Id, u64, Id, Id, bool,
+            app,
+            sel("nextEventMatchingMask:untilDate:inMode:dequeue:"),
+            std.math.maxInt(u64), @as(Id, null), NSDefaultRunLoopMode, true,
+        );
+        if (ev == null) break;
+        send1(void, Id, app, sel("sendEvent:"), ev);
+    }
+    send(void, app, sel("updateWindows"));
+}
+
 // ============================================================================
 // The bridge. msgSend, arity-indexed — objc_msgSend is an unprototyped
 // forwarder; the call's real signature is asserted per use by the
@@ -86,6 +103,10 @@ pub fn send3(comptime R: type, comptime A1: type, comptime A2: type, comptime A3
 
 pub fn send4(comptime R: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, recv: Id, selector: SEL, a1: A1, a2: A2, a3: A3, a4: A4) R {
     return @as(*const fn (Id, SEL, A1, A2, A3, A4) callconv(.c) R, @ptrCast(&objc.objc_msgSend))(recv, selector, a1, a2, a3, a4);
+}
+
+pub fn send5(comptime R: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, comptime A5: type, recv: Id, selector: SEL, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) R {
+    return @as(*const fn (Id, SEL, A1, A2, A3, A4, A5) callconv(.c) R, @ptrCast(&objc.objc_msgSend))(recv, selector, a1, a2, a3, a4, a5);
 }
 
 pub fn cstr(title: []const u8, buf: []u8) [*:0]const u8 {
@@ -514,9 +535,10 @@ var menu_bar_count: usize = 0;
 }
 
 // One menu entry — `key` is the keyEquivalent: "q" yields Cmd-Q for
-// free (Command is the default modifier mask). `action` rides into
-// MenuActionData as representedObject; `tag` is the integer matcher.
-~pub tor menu.item { bar: *MenuBar<ready>, label: string, key: string, action: string, tag: i64 }
+// free (Command is the default modifier mask); absent means click-only.
+// `action` rides into MenuActionData as representedObject; `tag` is the
+// integer matcher.
+~pub tor menu.item { bar: *MenuBar<ready>, label: string, key: ?string, action: string, tag: i64 }
 
 ~proc menu.item|zig {
     const pool = objc_autoreleasePoolPush();
@@ -526,7 +548,7 @@ var menu_bar_count: usize = 0;
     var kbuf: [16]u8 = undefined;
     const labelStr = cf.CFStringCreateWithCString(null, cstr(label, &lbuf), cf.kCFStringEncodingUTF8);
     const actStr = cf.CFStringCreateWithCString(null, cstr(action, &abuf), cf.kCFStringEncodingUTF8);
-    const keyStr = cf.CFStringCreateWithCString(null, cstr(key, &kbuf), cf.kCFStringEncodingUTF8);
+    const keyStr = cf.CFStringCreateWithCString(null, cstr(key orelse "", &kbuf), cf.kCFStringEncodingUTF8);
     const mi = send3(
         Id, Id, SEL, Id,
         send(Id, cls("NSMenuItem"), sel("alloc")),
@@ -574,11 +596,176 @@ var menu_bar_count: usize = 0;
 }
 
 // ============================================================================
-// host.run — the windowless pump. AppKit still needs its event loop
-// serviced for a menu to open or a click to arrive, so the shape is
-// frames-minus-render: acquire NSApp, pump pending events, drain the
-// mailbox into arms, honor quit(). `count` bounds the loop so tests halt.
+// Dialogs — the first synchronous verbs, and the reason host.run IS
+// -[NSApp run]. Probed: every non-run() path for runModal silently
+// aborts (session creates, its loop returns -1002, the window reports
+// isVisible but never composites — activation for unbundled binaries is
+// denied on macOS 14+). Once the app is genuinely running — which
+// host.run guarantees for anything called from an arm — runModal works
+// natively: real modality, centered panel, keyboard equivalents. The
+// answer arrives as a BRANCH: `dialog.confirm` -> | ok | | cancel |.
 // ============================================================================
+
+// A dialog is UI — a Prohibited app cannot show one. Upgrade to
+// Accessory when needed (agent UI may display windows); never downgrade
+// a windowed app's Regular.
+fn ensurePresentable() void {
+    const app = ensureApp();
+    if (send(i64, app, sel("activationPolicy")) == 2) {
+        setActivationPolicy(1);
+    }
+}
+
+// addButtonWithTitle: order is the response code — first added is
+// NSAlertFirstButtonReturn (1000), second is 1001.
+fn alertDialog(title: []const u8, message: []const u8, btn1: []const u8, btn2: ?[]const u8) i64 {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    ensurePresentable();
+    var tbuf: [256]u8 = undefined;
+    var mbuf: [1024]u8 = undefined;
+    var b1: [64]u8 = undefined;
+    var b2: [64]u8 = undefined;
+    const titleStr = cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8);
+    const msgStr = cf.CFStringCreateWithCString(null, cstr(message, &mbuf), cf.kCFStringEncodingUTF8);
+    const alert = send(Id, send(Id, cls("NSAlert"), sel("alloc")), sel("init"));
+    send1(void, Id, alert, sel("setMessageText:"), @as(Id, @ptrCast(@constCast(titleStr))));
+    send1(void, Id, alert, sel("setInformativeText:"), @as(Id, @ptrCast(@constCast(msgStr))));
+    send1(void, Id, alert, sel("addButtonWithTitle:"), @as(Id, @ptrCast(@constCast(cf.CFStringCreateWithCString(null, cstr(btn1, &b1), cf.kCFStringEncodingUTF8)))));
+    if (btn2) |b| {
+        send1(void, Id, alert, sel("addButtonWithTitle:"), @as(Id, @ptrCast(@constCast(cf.CFStringCreateWithCString(null, cstr(b, &b2), cf.kCFStringEncodingUTF8)))));
+    }
+    const r = send(i64, alert, sel("runModal"));
+    send(void, alert, sel("release"));
+    return r;
+}
+
+// One-button alert — no branch, the dismissal IS the answer.
+~pub tor dialog.alert { title: string, message: string }
+
+~proc dialog.alert|zig {
+    _ = alertDialog(title, message, "OK", null);
+}
+
+~pub tor dialog.confirm { title: string, message: string }
+| ok
+| cancel
+
+~proc dialog.confirm|zig {
+    if (alertDialog(title, message, "OK", "Cancel") == 1000) {
+        return .{ .ok = .{} };
+    }
+    return .{ .cancel = .{} };
+}
+
+// NSOpenPanel — same modal shape, returns a path. NSModalResponseOK is
+// 1; everything else (Cancel, Esc, closed) maps to the cancel branch.
+// The path string is heap-duped out of the panel's NSString — it owns
+// no obligation because a path is just data, not a native handle.
+~pub tor dialog.open { title: string }
+| path string
+| cancel
+
+~proc dialog.open|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    ensurePresentable();
+    var tbuf: [256]u8 = undefined;
+    const titleStr = cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8);
+    const panel = send(Id, cls("NSOpenPanel"), sel("openPanel"));
+    send1(void, Id, panel, sel("setTitle:"), @as(Id, @ptrCast(@constCast(titleStr))));
+    send1(void, bool, panel, sel("setCanChooseFiles:"), true);
+    send1(void, bool, panel, sel("setCanChooseDirectories:"), false);
+    if (send(i64, panel, sel("runModal")) != 1) {
+        return .{ .cancel = .{} };
+    }
+    const url = send(Id, send(Id, panel, sel("URL")), sel("path"));
+    var pbuf: [2048]u8 = undefined;
+    if (!CFStringGetCString(url, &pbuf, pbuf.len, cf.kCFStringEncodingUTF8)) {
+        return .{ .cancel = .{} };
+    }
+    const n = std.mem.len(@as([*:0]u8, @ptrCast(&pbuf)));
+    const s = std.heap.page_allocator.dupe(u8, pbuf[0..n]) catch @panic("host: OOM in dialog.open path");
+    return .{ .path = s };
+}
+
+// ============================================================================
+// host.run — the windowless pump, now riding AppKit's own loop. This was
+// a manual nextEventMatchingMask pump until dialogs forced the truth:
+// modal machinery, prompt compositing, and activation all gate on
+// -[NSApp run] having installed the app as running — no KVC flag or
+// manual drain reproduces it. So run() owns the thread, and a repeating
+// NSTimer on the main run loop drains the chrome ring into the stashed
+// arm closures. quit()/count stop the loop via stop: plus a wake —
+// stop: alone won't break a run() blocked waiting for an event.
+// ============================================================================
+
+pub extern fn CFRunLoopGetMain() callconv(.c) Id;
+pub extern fn CFRunLoopWakeUp(rl: Id) callconv(.c) void;
+
+const HostArms = struct {
+    tray: *const fn (TrayActionData) void,
+    menu: *const fn (MenuActionData) void,
+};
+
+var host_arms: ?HostArms = null;
+var host_ticks: i32 = 0;
+var host_cap: i32 = 0;
+var host_app: Id = null;
+
+fn impHostTick(recv: Id, _s: SEL, timer: Id) callconv(.c) void {
+    _ = recv;
+    _ = _s;
+    while (popEvent()) |hev| {
+        if (host_arms) |arms| {
+            switch (hev) {
+                .tray => |td| arms.tray(td),
+                .menu => |md| arms.menu(md),
+            }
+        }
+    }
+    host_ticks += 1;
+    if (should_quit or host_ticks >= host_cap) {
+        send(void, timer, sel("invalidate"));
+        if (host_app) |app| {
+            send1(void, Id, app, sel("stop:"), @as(Id, null));
+            // stop: only takes effect when the run loop iterates — and a
+            // run() blocked in nextEventMatchingMask waits on a mach port,
+            // not the CFRunLoop, so CFRunLoopWakeUp can't reach it. A
+            // posted ApplicationDefined event is the wake that lands.
+            postWakeEvent(app);
+        }
+    }
+}
+
+const NSPoint = extern struct { x: f64, y: f64 };
+
+fn postWakeEvent(app: Id) void {
+    const makeEvent = @as(
+        *const fn (Id, SEL, i64, NSPoint, u64, f64, i64, Id, i64, i64, i64) callconv(.c) Id,
+        @ptrCast(&objc.objc_msgSend),
+    );
+    const ev = makeEvent(
+        cls("NSEvent"),
+        sel("otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:"),
+        15, // NSApplicationDefined
+        .{ .x = 0, .y = 0 }, 0, 0.0, 0, null, 0, 0, 0,
+    );
+    send2(void, Id, bool, app, sel("postEvent:atStart:"), ev, true);
+}
+
+var host_tick_target: ?Id = null;
+
+fn ensureHostTickTarget() ?Id {
+    if (host_tick_target) |t| return t;
+    const sup: objc.Class = @ptrCast(cls("NSObject"));
+    const c = objc.objc_allocateClassPair(sup, "KoruHostTick", 0) orelse return null;
+    _ = objc.class_addMethod(c, sel("hostTick:"), @ptrCast(&impHostTick), "v@:@");
+    objc.objc_registerClassPair(c);
+    const t = send(Id, send(Id, @as(Id, @ptrCast(c)), sel("alloc")), sel("init"));
+    host_tick_target = t;
+    return t;
+}
 
 ~pub tor host.run { count: ?i32 }
 ! ?tray-action libs/host:TrayActionData
@@ -588,31 +775,20 @@ var menu_bar_count: usize = 0;
 ~proc host.run|zig {
     const __cap = @as(?i32, count) orelse 2147483647;
     const app = $mod.ensureApp();
-    var i: i32 = 0;
-    while (i < __cap) : (i += 1) {
-        const pool = $mod.objc_autoreleasePoolPush();
-        defer $mod.objc_autoreleasePoolPop(pool);
-        while (true) {
-            const ev = $mod.send4(
-                $mod.Id, u64, $mod.Id, $mod.Id, bool,
-                app,
-                $mod.sel("nextEventMatchingMask:untilDate:inMode:dequeue:"),
-                $mod.std.math.maxInt(u64), @as($mod.Id, null), $mod.NSDefaultRunLoopMode, true,
-            );
-            if (ev == null) break;
-            $mod.send1(void, $mod.Id, app, $mod.sel("sendEvent:"), ev);
-        }
-        $mod.send(void, app, $mod.sel("updateWindows"));
-        $mod.serviceRunLoop();
-        while ($mod.popEvent()) |hev| {
-            switch (hev) {
-                .tray => |td| tray_action(td),
-                .menu => |md| menu_action(md),
-            }
-        }
-        if ($mod.should_quit) break;
-        $mod.std.Thread.sleep(16 * $mod.std.time.ns_per_ms);
-    }
+    $mod.host_arms = .{ .tray = tray_action, .menu = menu_action };
+    $mod.host_app = app;
+    $mod.host_ticks = 0;
+    $mod.host_cap = __cap;
+    const t = $mod.ensureHostTickTarget() orelse return .{ .done = .{} };
+    const timer = $mod.send5(
+        $mod.Id, f64, $mod.Id, $mod.SEL, $mod.Id, bool,
+        $mod.cls("NSTimer"),
+        $mod.sel("timerWithTimeInterval:target:selector:userInfo:repeats:"),
+        0.004, t, $mod.sel("hostTick:"), @as($mod.Id, null), true,
+    );
+    const rl = $mod.send($mod.Id, $mod.cls("NSRunLoop"), $mod.sel("mainRunLoop"));
+    $mod.send2(void, $mod.Id, $mod.Id, rl, $mod.sel("addTimer:forMode:"), timer, $mod.NSDefaultRunLoopMode);
+    $mod.send(void, app, $mod.sel("run"));
     return .{ .done = .{} };
 }
 

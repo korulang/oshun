@@ -33,3 +33,18 @@ run-loop source — NSTimer, `performSelector:afterDelay:`, tracking
 areas on custom views, event taps — works only because both pumps
 service the loop. A third pump that forgets the call reintroduces the
 starvation invisibly.
+
+**Second ruling, same territory (dialogs forced it):** a serviced pump
+satisfies run-loop *sources* but not run-loop *state*. `NSAlert`'s
+`runModal`, `beginModalSessionForWindow:`, prompt window compositing,
+and activation all gate on `-[NSApp run]` having installed the app as
+running — `finishLaunching` + `_running` KVC + every manual-drain
+combination still returns instantly or reports `isVisible` while
+nothing composites. So `host.run` stopped being a manual pump: it IS
+`-[NSApp run]` with a repeating `NSTimer` draining the chrome ring, and
+dialogs back on the native `runModal`. `frames` stays manual — its
+contract is rendering, and serviced sources are all it needs — but any
+verb wanting AppKit's state machinery must fire from inside `run()`'s
+loop, which today means a `host.run` arm. `stop:` alone cannot break a
+`run()` waiting on its event mach-port; the wake is a posted
+`NSApplicationDefined` event.
