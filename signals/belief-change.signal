@@ -1,0 +1,6 @@
+name: belief-change
+kind: inferred
+shape: categorical
+face: in
+membrane: true
+note: a belief about the system changed — garden the concept in the same commit
