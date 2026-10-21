@@ -1,0 +1,7 @@
+name: capability-growth
+kind: inferred
+shape: categorical
+face: in
+membrane: false
+note: the solver dialect's gate-verified parity surface widened — a
+  feature moved from ABSENT to PARITY under the differential gate
