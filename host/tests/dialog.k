@@ -14,7 +14,12 @@
 //   koruc run host/tests/dialog.k
 
 import libs/host
+import std/build
 import std/io
+
+// Bundle identity — embedded in __TEXT,__info_plist, so NSBundle.mainBundle
+// answers a real CFBundleName and the app no longer presents as "a.out".
+std/build:app { name: "Oshun Dialog Probe", id: "org.koru.oshun.dialog", version: "0.1" }
 
 [with(libs/host)]
 tray.new(title: "◉ dlg")

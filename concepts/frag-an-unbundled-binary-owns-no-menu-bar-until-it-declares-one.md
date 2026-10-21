@@ -30,3 +30,13 @@ Two rules that fall out of it:
 - The minimal `mainMenu` (an empty NSMenu) is scaffolding for the
   `menu` verb, not a substitute — it yields an Apple menu and a bar
   to reveal, nothing more.
+
+Identity is a second declaration, orthogonal to presence: an unbundled
+binary embeds `Info.plist` as `__TEXT,__info_plist` (a compile-time C
+section attribute, no linker flags), and AppKit's app-menu title reads
+`CFBundleName` from it — the menu heading stops being `a.out`. But the
+oracles are split: `NSBundle.mainBundle` and AppKit honor the embedded
+plist while `NSProcessInfo.processName` and LaunchServices
+`LSDisplayName` still read the executable name. So the declaration buys
+the menu title and bundle queries — not every system name; that last
+row needs real `.app` packaging.

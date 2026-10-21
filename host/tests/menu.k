@@ -12,12 +12,15 @@
 //   koruc run host/tests/menu.k
 
 import libs/host
+import std/build
 import std/io
+
+std/build:app { name: "Oshun Menu Probe", id: "org.koru.oshun.menu", version: "0.1" }
 
 [with(libs/host)]
 menu.new()
 | menu m |> menu.bar(menu: m, title: "App")
-    | bar b |> menu.item(bar: b, label: "Quit a.out", key: "q", action: "quit", tag: 9)
+    | bar b |> menu.item(bar: b, label: "Quit Oshun Menu Probe", key: "q", action: "quit", tag: 9)
             |> menu.action(tag: 5, action: "synthetic-beep")
             |> host.run(count: 3600)
         ! menu-action a |> std/io:print.ln("menu: \"{{ a.action:s }}\" tag={{ a.tag:d }}")
