@@ -1625,6 +1625,10 @@ fn buildPipelines(device: Id) error{
             $mod.send1(void, $mod.Id, win.app, $mod.sel("sendEvent:"), ev);
         }
         $mod.send(void, win.app, $mod.sel("updateWindows"));
+        // nextEventMatchingMask never waits (nil untilDate), so it never
+        // spins the run loop — without this, timers, tracking areas, and
+        // the system menu bar's auto-hide reveal are all starved.
+        $mod.H.serviceRunLoop();
 
         // Mailbox -> effect arms, the dispatch site. Two rings, one drain:
         // the window's own buffer, then the host's tray ring — a menu click

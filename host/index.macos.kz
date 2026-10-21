@@ -42,6 +42,17 @@ pub extern fn objc_autoreleasePoolPush() callconv(.c) *anyopaque;
 pub extern fn objc_autoreleasePoolPop(*anyopaque) callconv(.c) void;
 pub extern fn CFStringGetCString(s: ?*const anyopaque, buf: [*]u8, max: isize, enc: u32) callconv(.c) bool;
 pub extern var NSDefaultRunLoopMode: Id;
+pub extern var kCFRunLoopDefaultMode: Id;
+pub extern fn CFRunLoopRunInMode(mode: Id, seconds: f64, handled: bool) callconv(.c) i32;
+
+// Service the run loop the manual pump starves. nextEventMatchingMask
+// only spins the run loop while it WAITS — our nil untilDate never
+// waits, so every run-loop source in the process (timers, tracking
+// areas, deferred selectors, the system menu bar's auto-hide reveal)
+// is dead without this. Zero-cost: returns as soon as sources drain.
+pub fn serviceRunLoop() void {
+    _ = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, true);
+}
 
 // ============================================================================
 // The bridge. msgSend, arity-indexed — objc_msgSend is an unprototyped
@@ -402,6 +413,7 @@ fn ensureMenu(tray: *Tray) void {
             $mod.send1(void, $mod.Id, app, $mod.sel("sendEvent:"), ev);
         }
         $mod.send(void, app, $mod.sel("updateWindows"));
+        $mod.serviceRunLoop();
         while ($mod.trayPopEvent()) |tev| {
             tray_action(tev);
         }
