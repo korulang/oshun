@@ -67,6 +67,12 @@ pub const Tree = struct {
 fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     const len: usize = @intCast(@max(ed.errorText.length, 0));
     std.debug.print("clay: error {d}: {s}\n", .{ @as(u32, ed.errorType), ed.errorText.chars[0..len] });
+    // Gate-visible token on stdout — the differential comparator reads the
+    // command dump, and diagnostics land during declaration (before drain),
+    // so they can be compared positionally per section.
+    var buf: [24]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "err t={d}\n", .{@as(u32, ed.errorType)}) catch return;
+    std.fs.File.stdout().writeAll(line) catch {};
 }
 
 // ============================================================================

@@ -65,6 +65,22 @@ nl.el.* — attachTo PARENT/ROOT (the corpus does not draw
 ELEMENT_WITH_ID), attachPoints 9x9 element x parent, expand,
 clipTo ATTACHED_PARENT/NONE, zIndex).
 
+growth 2026-10-21 — pct>1 diagnostic parity: ninth cycle, and the last
+ABSENT additive port. The error stream is now part of the compared
+surface. clayErr keeps its stderr line but also emits a normalized
+`err t={d}` token on stdout so the dump carries it; nl's four configure
+procs fire the identical check on the declared sizing
+((wk==PCT and w>1) or (hk==PCT and h>1)) — per configure call, like
+ConfigureOpenElementPtr, so reconfigures double-fire exactly as Clay
+does. The binding's sizing() union trick matters here: percent values
+land in minMax.min, which aliases size.percent — the >1 check reads
+the raw value either way. MUT gained a boundary-crossing arm (pct w
+<=1 -> +1.5) so rejection now exercises the diagnostic channel too.
+Comparator parses per-section ordered err sequences — all diagnostics
+precede cmds since declaration strictly precedes drain. Receipt:
+GATE PASS — CAND==REF over 2106 cmds + 50 err t=6 lines matching
+positionally; MUT rejected with 3293 divergences (363 err lines vs
+REF's 50 — the boundary arm alone guarantees err-stream divergence).
 growth 2026-10-21 — floating/attach/expand/zIndex: eighth cycle, the
 first that was a STRUCTURE port, not a field port. Clay registers a
 layoutElementTreeRoots entry on EVERY ConfigureOpenElement call whose
@@ -93,7 +109,6 @@ divergences; smoke, gallery, gallery_comp (8GB), bench_solvers,
 folder_snap, spec_snap green. Dead-draw audit rerun: first zi draw
 was divTrunc(s4,2^32)==0 always -> every zi drew -3 silently.
 ABSENT,
-additive ports — pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
 instead), ATTACH_TO_ELEMENT_WITH_ID (wants spec-row refs, not hashes),
 internal scroll state (frame-pure by design — childOffset is app-owned),

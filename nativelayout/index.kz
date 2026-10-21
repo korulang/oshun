@@ -101,6 +101,14 @@ const TTB: u8 = 1;
 const MAXF: f32 = 3.4028234663852886e+38;
 const EPS: f32 = 0.01;
 
+// Mirror of ConfigureOpenElementPtr's percentage-over-1 diagnostic —
+// fires per configure call on the declared sizing, before any field work.
+// CLAY_ERROR_TYPE_PERCENTAGE_OVER_1 is enum ordinal 6.
+fn pctOverErr() void {
+    std.debug.print("nl: error 6: An element was configured with CLAY_SIZING_PERCENT, but the provided percentage value was over 1.0. Clay expects a value between 0 and 1, i.e. 20% is 0.2.\n", .{});
+    std.fs.File.stdout().writeAll("err t=6\n") catch {};
+}
+
 const El = struct {
     wk: u8 = 0,
     hk: u8 = 0,
@@ -1128,6 +1136,7 @@ fn solve(n: *Native) void {
     // ConfigureOpenElement replaces the WHOLE decl — fields an op doesn't
     // carry reset to zero, matching the clay path. nc is declaration state,
     // not config: children already attached survive a re-configure.
+    if ((wk == 2 and w > 1.0) or (hk == 2 and h > 1.0)) $mod.pctOverErr();
     const e = &t.n.els.items[@intCast(t.n.stack.items[t.n.stack.items.len - 1])];
     const nc = e.nc;
     e.* = .{ .nc = nc };
@@ -1208,6 +1217,7 @@ fn solve(n: *Native) void {
 }
 
 ~proc nl.el.img|zig {
+    if ((wk == 2 and w > 1.0) or (hk == 2 and h > 1.0)) $mod.pctOverErr();
     const e = &t.n.els.items[@intCast(t.n.stack.items[t.n.stack.items.len - 1])];
     const nc = e.nc;
     e.* = .{ .nc = nc };
@@ -1280,6 +1290,7 @@ fn solve(n: *Native) void {
 }
 
 ~proc nl.el.custom|zig {
+    if ((wk == 2 and w > 1.0) or (hk == 2 and h > 1.0)) $mod.pctOverErr();
     const e = &t.n.els.items[@intCast(t.n.stack.items[t.n.stack.items.len - 1])];
     const nc = e.nc;
     e.* = .{ .nc = nc };
@@ -1350,6 +1361,7 @@ fn solve(n: *Native) void {
 }
 
 ~proc nl.el.clip|zig {
+    if ((wk == 2 and w > 1.0) or (hk == 2 and h > 1.0)) $mod.pctOverErr();
     const e = &t.n.els.items[@intCast(t.n.stack.items[t.n.stack.items.len - 1])];
     const nc = e.nc;
     e.* = .{ .nc = nc };

@@ -218,7 +218,7 @@ libs/clay:init(width: 900, height: 640)
                     |> if (s.kind == 0)
                         | then |> libs/clay:el.open(t)
                             |> libs/clay:el.cfg(t,
-                                wk: if (s.dk == 1 or s.dk == 3) 1 else if (s.dk == 2) 3 else s.wk, w: if (s.wk == 2) s.w else s.w + @as(f64, @floatFromInt(world.mut)),
+                                wk: if (s.dk == 1 or s.dk == 3) 1 else if (s.dk == 2) 3 else s.wk, w: if (s.wk == 2) (if (s.w <= 1.0) s.w + 1.5 else s.w) else s.w + @as(f64, @floatFromInt(world.mut)),
                                 hk: if (s.dk == 1) 3 else if (s.dk == 2 or s.dk == 3) 1 else s.hk, s.h,
                                 s.dir, gap: s.gap + world.mut, padl: s.padl + world.mut, s.padr, s.padt, s.padb, s.ax, s.ay,
                                 s.r, s.g, s.b, s.a, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)

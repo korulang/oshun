@@ -42,14 +42,18 @@ pat = re.compile(
     r" fi=(-?\d+) ls=([-\d.]+) lh=([-\d.]+) z=(-?\d+) tx=(.*)$")
 
 def parse(path):
-    secs, cur = {}, None
+    secs, errs, cur = {}, {}, None
     for line in open(path):
         line = line.rstrip("\n")
         if line.startswith("==") and line.endswith("=="):
             cur = line.strip("=")
             secs[cur] = []
+            errs[cur] = []
             continue
         if cur is None:
+            continue
+        if line.startswith("err t="):
+            errs[cur].append(line[6:])
             continue
         m = pat.match(line)
         if m:
@@ -62,7 +66,18 @@ def parse(path):
                                   bw=[float(g[17]), float(g[18]), float(g[19]), float(g[20]), float(g[21])],
                                   fi=int(g[22]), ls=float(g[23]), lh=float(g[24]),
                                   zi=int(g[25]), tx=g[26]))
-    return secs
+    return secs, errs
+
+def cmp_errs(a, b, label):
+    # Ordered error-type sequences per section — diagnostics fire during
+    # declaration, so each section's err list precedes its cmd list.
+    if a == b:
+        return []
+    diffs = [f"{label}: error stream {len(a)} vs {len(b)}"]
+    for idx, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            diffs.append(f"{label}: err[{idx}] t={x} vs t={y}")
+    return diffs
 
 def cmp_rows(a, b, label):
     fails = []
@@ -108,15 +123,15 @@ def cmp_rows(a, b, label):
                 fails.append(f"{label}[{idx}]: tx '{x['tx']}' vs '{y['tx']}'")
     return fails
 
-secs = parse(sys.argv[1])
+secs, errs = parse(sys.argv[1])
 missing = [s for s in ("REF", "CAND", "MUT") if s not in secs]
 if missing:
     print(f"GATE FAIL — missing sections: {', '.join(missing)}")
     sys.exit(1)
 
 ref, cand, mut = secs["REF"], secs["CAND"], secs["MUT"]
-cand_fails = cmp_rows(ref, cand, "cand")
-mut_fails = cmp_rows(ref, mut, "mut")
+cand_fails = cmp_rows(ref, cand, "cand") + cmp_errs(errs["REF"], errs["CAND"], "cand")
+mut_fails = cmp_rows(ref, mut, "mut") + cmp_errs(errs["REF"], errs["MUT"], "mut")
 
 problems = []
 if not ref:
