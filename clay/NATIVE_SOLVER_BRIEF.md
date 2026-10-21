@@ -443,6 +443,22 @@ ReleaseFast expand **0.021 → 0.00029**, frame **0.045 → ~0.024-0.030**
 unbounded — same eviction stance as clay's own hashmap; revisit if a
 long-lived consumer churns distinct strings.
 
+SKIP CEILING (2026-10-21 — `bench_scene_skip.k`): frame 1 runs the full
+pipeline and retains clay's drained cmd stream into an `rcmds` store;
+frames 2+ skip expansion + declare + solve + drain entirely and replay
+the retained rows. ReleaseFast clean frame: **0.000083 ms** (83ns —
+replay sub-lap-granularity, frame total is pass overhead). Replaying
+m=20 matches the retained n=20. Versus ~0.024 memoized — gating on a
+static scene is worth another ~300×: a clean frame costs nothing.
+
+Two production caveats measured-in: (1) `std/store` has no dirty signal
+— cleanliness must be app-declared or derived from a standing `!` watch
+on spec fields bumping a version cell; (2) clay's stale-box warm-up
+drifts the stream frame1→2 on attach-affected scenes (the gate's 2106→
+2092) — a retained stream freezes whichever frame wrote it, so a
+correct gate retains through the warm-up (frames ≤2) or accepts the
+frame-1 stream as canonical.
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,

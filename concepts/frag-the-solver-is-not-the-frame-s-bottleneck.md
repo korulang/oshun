@@ -34,9 +34,11 @@ consolidation, not as a number: the walk it would absorb is already
 bridge (~20µs/frame here, scaling per text row) — **landed**: a
 module-level AutoHashMap in `measure.text` took expand 0.021 → 0.0003
 and the frame to the dirty-gate ceiling while expansion still runs
-every frame — dirty gating (all of it, while rows are static), solver
-swap (~2µs, correctness-complete cold+warm, pixel-identical consumer
-path).
+every frame — dirty gating (all of it, while rows are static — now
+measured too: retaining the drained cmd stream and replaying it on
+clean frames costs **83ns/frame**, ~300× under the memoized frame),
+solver swap (~2µs, correctness-complete cold+warm, pixel-identical
+consumer path).
 
 Corollary for future measurements in this codebase: cache misses at C
 boundaries hide inside passes that look like "machinery" until you
