@@ -323,6 +323,27 @@ Attribution verified by isolation: same corpus with text rows skipped
 nl ahead on every lap and ~25% ahead on the frame. The deficit is the
 ~600 Core Text shaping calls, nothing else.
 
+UI-DIALECT CENSUS (2026-10-21, answers "which absent features does
+production's declaration surface actually touch"): ui/index.kz's whole
+Clay surface is Clay__OpenElement (always anonymous — never
+OpenElementWithId), ConfigureOpenElement, OpenTextElement, CloseElement.
+Fields set: sizing (fit/grow/pct/fix + dock overrides), uniform pad,
+gap, ax/ay, dir, backgroundColor, userData (eid -> CmdView.ud, the
+hit-testing contract), floating (ATTACH_TO_ROOT + LEFT_TOP/LEFT_TOP +
+offset only), image.imageData, text (tx/fontSize/color/userData).
+Every one is ported, gated cold+warm in nl — ZERO absent-reachable
+features through the dialect path. The scoped-out gaps (element IDs +
+hover machinery, ATTACH_TO_ELEMENT_WITH_ID, pointer capture, internal
+scroll state, transitions, query APIs — PointerOver/GetElementData:
+grep-verified zero call sites outside clay_impl.c/nl/tests) are
+reachable only through the raw el.* bracket, which is the dev/test
+surface. Hit-testing is consumer-side via CmdView.ud rects — never
+Clay__PointerOver. Even the evolving-tree pboxes caveat is unreachable:
+ui's only floating path attaches to ROOT (par=0), whose persistent box
+is always {0,0,W,H} — index-keying and Clay's id-keying can never
+diverge there. (Clay's anonymous ids are HashNumber(siblingIndex,
+parentId) — position-derived hashes, same staleness class.)
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,
