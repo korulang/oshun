@@ -17,6 +17,9 @@ Per-kind field rules (matching what consumers actually read):
   cd d=           : kind 9 only as payload; compared everywhere — a
                     candidate leaking nonzero d= on other kinds fails
   fs f=, tx=      : kind 3 only (fs tol 0.001, tx exact)
+  fi=, ls=, lh=   : kind 3 only — fontId exact, letterSpacing and
+                    lineHeight compared as floats (tol 0.001);
+                    measured dims ride in r=
   corner cr=      : kinds 1 (RECT), 2 (BORDER — border.cornerRadius
                     shares the union head), 4 (IMAGE), and 9 (CUSTOM —
                     custom.cornerRadius sits at the same union offset) —
@@ -34,7 +37,8 @@ pat = re.compile(
     r"^cmd k=(\d+) ud=(-?\d+) r=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
     r" c=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
     r" i=(-?\d+) d=(-?\d+) f=([-\d.]+) cr=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
-    r" bw=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+) tx=(.*)$")
+    r" bw=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
+    r" fi=(-?\d+) ls=([-\d.]+) lh=([-\d.]+) tx=(.*)$")
 
 def parse(path):
     secs, cur = {}, None
@@ -55,7 +59,8 @@ def parse(path):
                                   i=int(g[10]), d=int(g[11]), f=float(g[12]),
                                   cr=[float(g[13]), float(g[14]), float(g[15]), float(g[16])],
                                   bw=[float(g[17]), float(g[18]), float(g[19]), float(g[20]), float(g[21])],
-                                  tx=g[22]))
+                                  fi=int(g[22]), ls=float(g[23]), lh=float(g[24]),
+                                  tx=g[25]))
     return secs
 
 def cmp_rows(a, b, label):
@@ -90,6 +95,12 @@ def cmp_rows(a, b, label):
         if x["k"] == 3:
             if abs(x["f"] - y["f"]) > 0.001:
                 fails.append(f"{label}[{idx}]: fs {x['f']} vs {y['f']}")
+            if x["fi"] != y["fi"]:
+                fails.append(f"{label}[{idx}]: fi {x['fi']} vs {y['fi']}")
+            if abs(x["ls"] - y["ls"]) > 0.001:
+                fails.append(f"{label}[{idx}]: ls {x['ls']} vs {y['ls']}")
+            if abs(x["lh"] - y["lh"]) > 0.001:
+                fails.append(f"{label}[{idx}]: lh {x['lh']} vs {y['lh']}")
             if x["tx"] != y["tx"]:
                 fails.append(f"{label}[{idx}]: tx '{x['tx']}' vs '{y['tx']}'")
     return fails

@@ -98,7 +98,7 @@ libs/clay:init(width: 640, height: 400)
                     |> std/store:stored { s.mw: 0.0, s.mh: 0.0, s.cw: 0.0, s.ch: 0.0, s.cc: 0 }
             |> std/store:query(spec)
                 ! query s when s.tx != ""
-                    |> libs/clay:measure.text(s.tx, s.fs): dims
+                    |> libs/clay:measure.text(s.tx, s.fs, 0.0): dims
                     |> std/store:stored { s.w: dims.w, s.h: dims.h, s.mw: dims.w, s.mh: dims.h }
             |> for(&[_]i64{ 2, 1 })
                 ! each lv |> std/store:query(spec)

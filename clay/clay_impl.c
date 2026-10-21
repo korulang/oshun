@@ -15,7 +15,7 @@
 // metal's draw.text shapes through NSFont systemFontOfSize:, so measured
 // boxes and drawn glyphs agree. If metal's text font ever becomes
 // configurable this must become a shared measure bridge, not a twin.
-Clay_Dimensions koru_clay_measure(const char *chars, int32_t len, double size) {
+Clay_Dimensions koru_clay_measure(const char *chars, int32_t len, double size, int32_t ls) {
     Clay_Dimensions d = { 0.0f, 0.0f };
     if (!chars || len <= 0 || size <= 0.0) return d;
     CTFontRef font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, (CGFloat)size, NULL);
@@ -32,7 +32,9 @@ Clay_Dimensions koru_clay_measure(const char *chars, int32_t len, double size) {
     CTLineRef line = CTLineCreateWithAttributedString(as);
     CGFloat asc = 0, desc = 0, lead = 0;
     double w = CTLineGetTypographicBounds(line, &asc, &desc, &lead);
-    d.width = (float)w;
+    // Upstream measure contract (clay_renderer_raylib.c): the returned width
+    // carries letterSpacing once per character, including the last.
+    d.width = (float)w + (float)ls * (float)len;
     d.height = (float)(asc + desc + lead);
     CFRelease(line);
     CFRelease(as);
@@ -46,7 +48,8 @@ static Clay_Dimensions koru_clay_measure_cb(Clay_StringSlice text,
         Clay_TextElementConfig *config, void *userData) {
     (void)userData;
     return koru_clay_measure(text.chars, text.length,
-        config ? (double)config->fontSize : 12.0);
+        config ? (double)config->fontSize : 12.0,
+        config ? (int32_t)config->letterSpacing : 0);
 }
 
 void koru_clay_install_measure(void) {

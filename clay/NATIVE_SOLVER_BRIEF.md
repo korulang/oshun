@@ -50,10 +50,18 @@ decl.border.{color,width} / El.br..bwc; kind 2 emits on pop before
 OVERLAY_END/SCISSOR_END, betweenChildren>0 emits interleaved k=1 RECTs
 walking child dims + gap; integer-division halves — childGap and
 betweenChildren are u16 so their /2 truncates, nl mirrors; CmdView +5
-bw fields; comparator compares c=/cr=/bw= on kind 2).
+bw fields; comparator compares c=/cr=/bw= on kind 2),
+TEXT CONFIG (fontId/letterSpacing/lineHeight/wrapMode/textAlignment on
+el.text + nl.el.text; measure fn widened to width += ls×len per the
+upstream renderer contract; lineHeight>0 overrides measured height at
+open, per wrapped line, AND halves-into the first-line y offset —
+clay.h:2984 centers the natural glyph box inside the line; alignment
+offsets each line's x by 0/half/full of the leftover width; wrapMode
+gates text resizability only — this vendored clay still wraps on
+spaces+newlines regardless, nl mirrors; CmdView +3 fields, comparator
+checks fi/ls/lh on kind 3).
 ABSENT,
-additive ports — letterSpacing/
-lineHeight/fontId, wrap NEWLINES/NONE, textAlignment, attachPoints 9×9,
+additive ports — attachPoints 9×9,
 attachTo PARENT/clipTo, expand, zIndex, pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
 instead), ATTACH_TO_ELEMENT_WITH_ID (wants spec-row refs, not hashes),
@@ -144,6 +152,31 @@ BORDER cmds, all five width columns nonzero, 68 betweenChildren.
 Receipt: GATE PASS — CAND==REF over 813 cmds; MUT rejected with 2716
 divergences; smoke, gallery, gallery_comp, bench_solvers, folder_snap
 green.
+
+growth 2026-10-21 — text config: seventh capability cycle, the whole
+Clay_TextElementConfig seam in one port (fid/ls/lh/wm/tal on el.text
++ nl.el.text → El.fid/ls/lh/wm/tal). koru_clay_measure widened to
+(chars, len, size, ls) applying the upstream renderer contract
+(width += ls×len, trailing space measure included); measure.text
+tor gained ls. Solver: lineHeight>0 sets open-time dims.height (min
+too), each wrapped line's h, the nl dh after wrap — and, the subtle
+bit, the EMIT path: clay.h:2984 starts yPosition at
+(finalLineHeight − naturalHeight)/2, vertically centering the natural
+box inside the line, which the gate caught as constant -4.43/-7.26
+y-offsets. textAlignment shifts each line's x by 0/half/full of the
+leftover width — the first cluster to move horizontal emission, not
+just dims. wrapMode in THIS vendored clay only gates resizability
+(clay.h:2366 wm!=WORDS drops the element from the resizable scan);
+the wrap routine still splits spaces+newlines for all modes — nl
+mirrors exactly rather than the enum's name. Corpus: fid 0-3, ls
+0-3, lh 0/10-39, wm/tal 0-2; 47 text cmds — 31 fid>0, 6 ls>0, 13
+lh>0, centered lines visible in x variance; MUT adds mut*4 to ls
+(lands in the measure fn → guaranteed width divergence). CmdView +3
+fields (fi/ls/lh), comparator checks them on kind 3. ui:text keeps
+its signature (zeroes the new fields — WORDS+LEFT defaults). Receipt:
+GATE PASS — CAND==REF over 786 cmds; MUT rejected with 2495
+divergences; smoke, gallery, gallery_comp (8192MB), bench_solvers
+(ReleaseFast: clay solve 0.035 vs nl 0.026), folder_snap green.
 
 landmine found 2026-10-20 — nl first lived as `~part native` of libs/clay.
 ~parts elaborate EAGERLY into every consumer: gallery_comp (never touches

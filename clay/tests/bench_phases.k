@@ -58,7 +58,7 @@ libs/clay:init(width: 640, height: 400)
                 |> std/store:stored { s.mw: 0.0, s.mh: 0.0, s.cw: 0.0, s.ch: 0.0, s.cc: 0 }
         |> std/store:query(spec)
             ! query s when s.tx != ""
-                |> libs/clay:measure.text(s.tx, s.fs): dims
+                |> libs/clay:measure.text(s.tx, s.fs, 0.0): dims
                 |> std/store:stored { s.w: dims.w, s.h: dims.h, s.mw: dims.w, s.mh: dims.h }
                 |> std/store:stored { world.n: world.n + 1 }
         |> for(&[_]i64{ 2, 1 })
@@ -132,7 +132,7 @@ libs/clay:init(width: 640, height: 400)
                         | drained |> std/store:stored { world.n: world.n + 0 }
             | done db |> std/io:print.ln("clay bracket: {{ db.seconds * 1000000.0 / @as(f64, @floatFromInt(db.passes)):f }}us")
                 |> std/benchmarking:run(seconds: 2)
-                    ! pass |> libs/clay:measure.text(tx: "auto hugs text", fs: 12.0): dm
+                    ! pass |> libs/clay:measure.text(tx: "auto hugs text", fs: 12.0, ls: 0.0): dm
                         |> std/store:stored { world.n: world.n + @as(i64, @intFromFloat(dm.w)) }
                     | done dc |> std/io:print.ln("measure.text alone: {{ dc.seconds * 1000000.0 / @as(f64, @floatFromInt(dc.passes)):f }}us")
                         |> libs/clay:drop(cl: h)

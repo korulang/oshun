@@ -169,7 +169,7 @@ libs/clay:init(width: 640, height: 480)
                                 | then |> std/store:insert(hit) { seq: rc.ud, cl: world.ic, rc.x, rc.y, rc.w, rc.h }
                                     |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
                                     |> if (rc.ud == 300)
-                                        | then |> libs/clay:measure.text(tx: "clicks: ", fs: 13.0): cd
+                                        | then |> libs/clay:measure.text(tx: "clicks: ", fs: 13.0, ls: 0.0): cd
                                             |> std/string:from-int(n: world.clicks)
                                                 | ok cn |> libs/metal:draw.text(f, x: @round(rc.x + cd.w), y: @round(rc.y), size: 13.0, r: 170.0, g: 176.0, b: 196.0, a: 255.0, text: cn.data)
                                                     |> std/string:free(s: cn)

@@ -46,7 +46,7 @@ const c = @cImport({
 // Rendered-content metric — implemented in clay_impl.c over Core Text and
 // installed as clay's MeasureTextFunction at init. measure.text calls the
 // same function directly.
-extern fn koru_clay_measure(chars: [*c]const u8, len: i32, size: f64) c.Clay_Dimensions;
+extern fn koru_clay_measure(chars: [*c]const u8, len: i32, size: f64, ls: i32) c.Clay_Dimensions;
 extern fn koru_clay_install_measure() void;
 
 // The solver handle — context + the arena's memory + the last solved command
@@ -294,6 +294,7 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     tx: string, fs: f64,
     r: f64, g: f64, b: f64, a: f64,
     eid: i64,
+    fid: i64, ls: i64, lh: i64, wm: i64, tal: i64,
 }
 
 ~proc el.text|zig {
@@ -301,6 +302,11 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     cfg.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     cfg.textColor = .{ .r = @floatCast(r), .g = @floatCast(g), .b = @floatCast(b), .a = @floatCast(a) };
     cfg.fontSize = @intFromFloat(@max(0.0, @round(fs)));
+    cfg.fontId = @intCast(@min(@max(fid, 0), 65535));
+    cfg.letterSpacing = @intCast(@min(@max(ls, 0), 65535));
+    cfg.lineHeight = @intCast(@min(@max(lh, 0), 65535));
+    cfg.wrapMode = @intCast(@min(@max(wm, 0), 2));
+    cfg.textAlignment = @intCast(@min(@max(tal, 0), 2));
     $mod.c.Clay__OpenTextElement(.{
         .isStaticallyAllocated = false,
         .length = @intCast(tx.len),
@@ -422,6 +428,9 @@ pub const CmdView = struct {
     bwt: f64,
     bwb: f64,
     bwc: f64,
+    fi: i64,
+    ls: f64,
+    lh: f64,
 };
 
 // Rendered-content dims — what a string occupies at a point size under the
@@ -434,10 +443,10 @@ pub const Dims = struct {
 
 // Standalone measure — calls the same function clay is registered to use for
 // CLAY_TEXT, so an outside walk and an inside text element agree on size.
-~pub tor measure.text { tx: string, fs: f64 } -> libs/clay:Dims
+~pub tor measure.text { tx: string, fs: f64, ls: f64 } -> libs/clay:Dims
 
 ~proc measure.text|zig {
-    const d = $mod.koru_clay_measure(tx.ptr, @intCast(tx.len), fs);
+    const d = $mod.koru_clay_measure(tx.ptr, @intCast(tx.len), fs, @intFromFloat(@max(ls, 0)));
     return .{ .w = @floatCast(d.width), .h = @floatCast(d.height) };
 }
 
@@ -493,6 +502,9 @@ pub const Dims = struct {
                 @as(f64, @floatFromInt(__rc.renderData.border.width.bottom)) else 0.0,
             .bwc = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
                 @as(f64, @floatFromInt(__rc.renderData.border.width.betweenChildren)) else 0.0,
+            .fi = if (is_text) @as(i64, @intCast(__rc.renderData.text.fontId)) else 0,
+            .ls = if (is_text) @as(f64, @floatFromInt(__rc.renderData.text.letterSpacing)) else 0.0,
+            .lh = if (is_text) @as(f64, @floatFromInt(__rc.renderData.text.lineHeight)) else 0.0,
         });
     }
     return .{ .drained = .{} };

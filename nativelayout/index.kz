@@ -25,7 +25,7 @@ const std = @import("std");
 
 // ABI twin of Clay_Dimensions — two f32s by value from koru_clay_measure.
 const Dims = extern struct { width: f32, height: f32 };
-extern fn koru_clay_measure(chars: [*c]const u8, len: i32, size: f64) Dims;
+extern fn koru_clay_measure(chars: [*c]const u8, len: i32, size: f64, ls: i32) Dims;
 
 // ============================================================================
 // Native solver (nl.*) — a parallel layout bracket over flat arrays.
@@ -148,6 +148,11 @@ const El = struct {
     tcg: f32 = 0,
     tcb: f32 = 0,
     tca: f32 = 0,
+    fid: u16 = 0,
+    ls: u16 = 0,
+    lh: u16 = 0,
+    wm: i64 = 0,
+    tal: i64 = 0,
     // solved
     dw: f32 = 0,
     dh: f32 = 0,
@@ -196,6 +201,9 @@ const Cmd = struct {
     bwt: f32 = 0,
     bwb: f32 = 0,
     bwc: f32 = 0,
+    fi: u16 = 0,
+    ls: f32 = 0,
+    lh: f32 = 0,
 };
 
 const alloc = std.heap.page_allocator;
@@ -313,7 +321,8 @@ fn closeEl(n: *Native) void {
 fn measureWords(n: *Native, e: *El) void {
     const tx = e.tx;
     const fs: f64 = @floatFromInt(e.fs);
-    const spw = koru_clay_measure(" ", 1, fs).width;
+    const ls: i32 = @intCast(e.ls);
+    const spw = koru_clay_measure(" ", 1, fs, ls).width;
     var lw: f32 = 0;
     var mw: f32 = 0;
     var start: usize = 0;
@@ -325,7 +334,7 @@ fn measureWords(n: *Native, e: *El) void {
             var dw: f32 = 0;
             var dh: f32 = 0;
             if (len > 0) {
-                const d = koru_clay_measure(tx[start..].ptr, @intCast(len), fs);
+                const d = koru_clay_measure(tx[start..].ptr, @intCast(len), fs, ls);
                 dw = d.width;
                 dh = d.height;
             }
@@ -350,15 +359,16 @@ fn measureWords(n: *Native, e: *El) void {
         }
     }
     if (end - start > 0) {
-        const d = koru_clay_measure(tx[start..].ptr, @intCast(end - start), fs);
+        const d = koru_clay_measure(tx[start..].ptr, @intCast(end - start), fs, ls);
         n.words.append(alloc, .{ .s = @intCast(start), .len = @intCast(end - start), .w = d.width }) catch @panic("nl: OOM");
         lw += d.width;
         e.unw_h = @max(e.unw_h, d.height);
         e.tmin = @max(d.width, e.tmin);
     }
-    e.unw_w = @max(lw, mw);
+    // clay.h:1766 — unwrapped width sheds one trailing letterSpacing.
+    e.unw_w = @max(lw, mw) - @as(f32, @floatFromInt(e.ls));
     e.dw = e.unw_w;
-    e.dh = e.unw_h;
+    e.dh = if (e.lh > 0) @floatFromInt(e.lh) else e.unw_h;
     e.mw = e.tmin;
     e.mh = e.dh;
     e.nw = @intCast(n.words.items.len - @as(usize, @intCast(e.w0)));
@@ -434,7 +444,7 @@ fn sizeAxis(n: *Native, xAxis: bool) void {
                 if (xAxis and !ce.is_text and ce.ar != 0) {
                     n.aspects.append(alloc, ci) catch @panic("nl: OOM");
                 }
-                if (ck != PCT and ck != FIX) {
+                if (ck != PCT and ck != FIX and (!ce.is_text or ce.wm == 0)) {
                     n.rbuf.append(alloc, ci) catch @panic("nl: OOM");
                 }
                 if (along) {
@@ -578,7 +588,7 @@ fn wrapTexts(n: *Native) void {
         // pass's lines count — reset nl alongside l0.
         e.l0 = @intCast(n.lines.items.len);
         e.nl = 0;
-        const lineH = e.unw_h;
+        const lineH: f32 = if (e.lh > 0) @floatFromInt(e.lh) else e.unw_h;
         var lw: f32 = 0;
         var lineLen: i32 = 0;
         var lineStart: i32 = 0;
@@ -587,7 +597,7 @@ fn wrapTexts(n: *Native) void {
             e.nl += 1;
             continue;
         }
-        const spw = koru_clay_measure(" ", 1, @floatFromInt(e.fs)).width;
+        const spw = koru_clay_measure(" ", 1, @floatFromInt(e.fs), @intCast(e.ls)).width;
         var wi: usize = @intCast(e.w0);
         const wend = wi + @as(usize, @intCast(e.nw));
         while (wi < wend) {
@@ -609,13 +619,13 @@ fn wrapTexts(n: *Native) void {
                 lineLen = 0;
                 lineStart = word.s;
             } else {
-                lw += word.w;
+                lw += word.w + @as(f32, @floatFromInt(e.ls));
                 lineLen += word.len;
                 wi += 1;
             }
         }
         if (lineLen > 0) {
-            n.lines.append(alloc, .{ .w = lw, .h = lineH, .s = lineStart, .len = lineLen }) catch @panic("nl: OOM");
+            n.lines.append(alloc, .{ .w = lw - @as(f32, @floatFromInt(e.ls)), .h = lineH, .s = lineStart, .len = lineLen }) catch @panic("nl: OOM");
             e.nl += 1;
         }
         e.dh = lineH * @as(f32, @floatFromInt(e.nl));
@@ -758,16 +768,24 @@ fn emitCommands(n: *Native) void {
             const offs = offscreen(n, bx, by, e.dw, e.dh);
             if (!offs) {
                 if (e.is_text) {
-                    var ypos: f32 = 0;
+                    // clay.h:2981 — the natural glyph box centers inside the
+                    // configured line height: first line offsets by half the
+                    // difference, each line then advances by finalLineHeight.
+                    const lineH: f32 = if (e.lh > 0) @floatFromInt(e.lh) else e.unw_h;
+                    var ypos: f32 = (lineH - e.unw_h) / 2;
                     const ll = n.lines.items[@intCast(e.l0)..@intCast(e.l0 + e.nl)];
                     for (ll) |line| {
                         if (line.len == 0) {
-                            ypos += e.unw_h;
+                            ypos += line.h;
                             continue;
                         }
+                        // textAlignment: line offset inside the element box
+                        // (clay.h:2991 — LEFT 0, CENTER half, RIGHT full).
+                        var toff: f32 = e.dw - line.w;
+                        if (e.tal == 0) toff = 0 else if (e.tal == 1) toff /= 2;
                         n.cmds.append(alloc, .{
                             .kind = 3,
-                            .x = bx,
+                            .x = bx + toff,
                             .y = by + ypos,
                             .w = line.w,
                             .h = line.h,
@@ -778,8 +796,11 @@ fn emitCommands(n: *Native) void {
                             .ud = e.ud,
                             .tx = e.tx[@intCast(line.s)..@intCast(line.s + line.len)],
                             .fs = e.fs,
+                            .fi = e.fid,
+                            .ls = @floatFromInt(e.ls),
+                            .lh = @floatFromInt(e.lh),
                         }) catch @panic("nl: OOM");
-                        ypos += e.unw_h;
+                        ypos += line.h;
                         if (by + ypos > n.h) break;
                     }
                 } else {
@@ -1169,6 +1190,7 @@ fn solve(n: *Native) void {
     tx: string, fs: f64,
     r: f64, g: f64, b: f64, a: f64,
     eid: i64,
+    fid: i64, ls: i64, lh: i64, wm: i64, tal: i64,
 }
 
 ~proc nl.el.text|zig {
@@ -1183,6 +1205,11 @@ fn solve(n: *Native) void {
     e.tcg = @floatCast(g);
     e.tcb = @floatCast(b);
     e.tca = @floatCast(a);
+    e.fid = @intCast(@min(@max(fid, 0), 65535));
+    e.ls = @intCast(@min(@max(ls, 0), 65535));
+    e.lh = @intCast(@min(@max(lh, 0), 65535));
+    e.wm = @min(@max(wm, 0), 2);
+    e.tal = @min(@max(tal, 0), 2);
     e.ud = @intCast(@as(u64, @bitCast(eid)));
     e.w0 = @intCast(n.words.items.len);
     $mod.measureWords(n, e);
@@ -1247,6 +1274,9 @@ fn solve(n: *Native) void {
             .bwt = rc.bwt,
             .bwb = rc.bwb,
             .bwc = rc.bwc,
+            .fi = @as(i64, rc.fi),
+            .ls = rc.ls,
+            .lh = rc.lh,
         });
     }
     return .{ .drained = .{} };
