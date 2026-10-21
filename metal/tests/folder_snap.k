@@ -7,6 +7,7 @@
 //
 //   koruc run metal/tests/folder_snap.k
 
+import libs/host
 import libs/metal
 import libs/clay
 import libs/ui
@@ -75,7 +76,7 @@ libs/clay:init(width: 720, height: 460)
             |> if (world.frame == 240)
                 | then |> libs/metal:window.snap(path: "/tmp/omni_folder_open.bmp")
             |> if (world.frame == 260)
-                | then |> libs/metal:quit()
+                | then |> libs/host:quit()
             |> libs/metal:draw.rect(f, x: 0.0, y: 228.0, w: 720.0, h: 2.0, r: 0.45, g: 0.45, b: 0.55, a: cam.tilt * 0.5)
             |> std/store:query(res)
                 ! query r
@@ -106,7 +107,7 @@ libs/clay:init(width: 720, height: 460)
             |> std/store:stored { world.tiltT: if (world.tiltT == 0) 1 else 0 }
         ! key-down k when k.code == 2
             |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
+        ! key-down k when k.code == 53 |> libs/host:quit()
         ! key-down k
             |> std/store:query(vreg)
                 ! query v when v.vkey == k.code
@@ -118,7 +119,7 @@ libs/clay:init(width: 720, height: 460)
                         | then |> std/store:query(res)
                             ! query c when c.parent == world.folderH or c.id == world.focus
                                 |> std/store:stored { c.touched: world.frame }
-        ! close |> libs/metal:quit()
+        ! close |> libs/host:quit()
         | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("folder_snap: closed")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

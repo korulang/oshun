@@ -9,6 +9,7 @@
 //
 //   koruc run metal/tests/tilt.k
 
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -59,7 +60,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni tilt — T tilt, D 
         |> std/store:stored { world.tiltT: if (world.tiltT == 0) 1 else 0 }
     ! key-down k when k.code == 2
         |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
-    ! key-down k when k.code == 53 |> libs/metal:quit()
-    ! close |> libs/metal:quit()
+    ! key-down k when k.code == 53 |> libs/host:quit()
+    ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("tilt: closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")

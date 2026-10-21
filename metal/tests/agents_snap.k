@@ -7,6 +7,7 @@
 //   koruc run metal/tests/agents_snap.k
 //   sips -s format png /tmp/omni_agents_before.bmp --out /tmp/omni_agents_before.png
 
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -54,7 +55,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni agents snap")
         |> if (world.frame == 200)
             | then |> libs/metal:window.snap(path: "/tmp/omni_agents_after.bmp")
         |> if (world.frame == 220)
-            | then |> libs/metal:quit()
+            | then |> libs/host:quit()
         |> libs/metal:draw.rect(f, x: 0.0, y: 228.0, w: 720.0, h: 2.0, r: 0.45, g: 0.45, b: 0.55, a: cam.tilt * 0.5)
         |> std/store:query(res)
             ! query r
@@ -73,7 +74,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni agents snap")
         |> std/store:stored { world.tiltT: if (world.tiltT == 0) 1 else 0 }
     ! key-down k when k.code == 2
         |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
-    ! key-down k when k.code == 53 |> libs/metal:quit()
-    ! close |> libs/metal:quit()
+    ! key-down k when k.code == 53 |> libs/host:quit()
+    ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("agents_snap: closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")

@@ -4,6 +4,7 @@
 // presented drawable at frame 30 into a BMP, and the run quits itself.
 // The artifact is the point: a harness run produces pixels an agent can
 // inspect — sips -s format png /tmp/omni_snap.bmp --out /tmp/omni_snap.png.
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -23,10 +24,10 @@ libs/metal:window.open(width: 640, height: 400, title: "omni snap — automation
         |> if (world.frame == 30)
             | then |> libs/metal:window.snap(path: "/tmp/omni_snap.bmp")
         |> if (world.frame == 40)
-            | then |> libs/metal:quit()
+            | then |> libs/host:quit()
     ! key-down k when k.code == 124
         |> std/store:stored { world.focus: if (world.focus + 1 >= 2) 0 else world.focus + 1 }
-    ! key-down k when k.code == 53 |> libs/metal:quit()
-    ! close |> libs/metal:quit()
+    ! key-down k when k.code == 53 |> libs/host:quit()
+    ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("snap: closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")

@@ -12,6 +12,7 @@
 //
 //   koruc run metal/tests/folder.k
 
+import libs/host
 import libs/metal
 import libs/clay
 import libs/ui
@@ -89,7 +90,7 @@ libs/clay:init(width: 720, height: 460)
             |> std/store:stored { world.tiltT: if (world.tiltT == 0) 1 else 0 }
         ! key-down k when k.code == 2
             |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
+        ! key-down k when k.code == 53 |> libs/host:quit()
         ! key-down k
             |> std/store:query(vreg)
                 ! query v when v.vkey == k.code
@@ -101,7 +102,7 @@ libs/clay:init(width: 720, height: 460)
                         | then |> std/store:query(res)
                             ! query c when c.parent == world.folderH or c.id == world.focus
                                 |> std/store:stored { c.touched: world.frame }
-        ! close |> libs/metal:quit()
+        ! close |> libs/host:quit()
         | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("folder: closed")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

@@ -1,6 +1,7 @@
 // Window twin of offscreen_scene.k — identical draws, identical clear
 // color, 640x400 through the real frames pump. Snap at frame 3 (matching
 // the offscreen file's third and last committed frame), quit at 5.
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -20,6 +21,6 @@ libs/metal:window.open(width: 640, height: 400, title: "omni offscreen twin")
         |> if (world.frame == 3)
             | then |> libs/metal:window.snap(path: "/tmp/omni_offscreen_twin.bmp")
         |> if (world.frame == 5)
-            | then |> libs/metal:quit()
+            | then |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("twin: snapped + closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")

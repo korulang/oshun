@@ -6,6 +6,7 @@
 // is one *String<instance> bound before the window so every custody path
 // discharges; caret is a byte index (ASCII-exact — the str_idx UTF-16
 // contract).
+import libs/host
 import libs/metal
 import std/store
 import std/string
@@ -60,11 +61,11 @@ std/string:from-page(text: "edit me here")
                 ! key-down k when k.code == 124
                     |> std/string:len(s: txt) : n
                     |> std/store:stored { world.caret: if (world.caret < @as(i64, @intCast(n))) world.caret + 1 else @as(i64, @intCast(n)) }
-                ! key-down k when k.code == 53 |> libs/metal:quit()
+                ! key-down k when k.code == 53 |> libs/host:quit()
                 ! mouse-down m
                     |> libs/metal:text.index(win: w, text: txt.data, size: 18.0, x: m.x - 80.0) : idx
                     |> std/store:stored { world.caret: idx }
-                ! close |> libs/metal:quit()
+                ! close |> libs/host:quit()
                 | done w2 |> libs/metal:window.close(win: w2) |> std/string:free(s: txt) |> std/io:print.ln("textfield: closed")
         | err e |> std/string:free(s: txt) |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err _ |> std/io:print.ln("string init failed")

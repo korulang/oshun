@@ -6,7 +6,7 @@
 //   click the "◉ koru" status item -> menu -> items print; Quit exits.
 //   esc or the window's close button also quit.
 //
-// Automated path: libs/metal:tray.action pushes a synthesized event into
+// Automated path: libs/host:tray.action pushes a synthesized event into
 // the same mailbox — verifies ring -> arm dispatch without AX trust. The
 // KoruTrayTarget IMP wiring itself needs a real click (human, or System
 // Events).
@@ -16,10 +16,11 @@
 //
 //   koruc run metal/tests/tray.k
 
+import libs/host
 import libs/metal
 import std/io
 
-[with(libs/metal)]
+[with(libs/host, libs/metal)]
 tray.new(title: "◉ koru")
 | tray t |> tray.item(tray: t, label: "Beep", action: "beep", tag: 1)
          |> tray.sep(tray: t)

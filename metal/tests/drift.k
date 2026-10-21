@@ -9,6 +9,7 @@
 //
 //   koruc run metal/tests/drift.k     (→ cycle, esc quit)
 
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -52,7 +53,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni drift — → to to
         |> std/store:query(res)
             ! query r when r.id == world.focus
                 |> std/store:stored { r.touched: world.frame }
-    ! key-down k when k.code == 53 |> libs/metal:quit()
-    ! close |> libs/metal:quit()
+    ! key-down k when k.code == 53 |> libs/host:quit()
+    ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("drift: closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")

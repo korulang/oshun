@@ -1,0 +1,15 @@
+// oshun/host — the platform layer: NSApp lifecycle, the ObjC-runtime
+// bridge, the host-chrome mailbox (a tray ring today; dialogs and
+// notifications next), and host.run — the windowless pump that drains
+// it where effect arms are callable. Each module owns the ring its
+// native sources push into; a pump drains every ring its program's
+// arms listen to.
+//
+// Platform bodies live in gated parts — index.<os>.kz joins only under
+// its build flag, so a Windows part file can sit in this directory as
+// dormant bytes until its implementation exists. Decls and impls both
+// ride the part: the token types (*Tray holding an Id) are
+// platform-typed, and the decl surface cannot outlive the bodies that
+// honor it.
+
+~[build == macos]part macos

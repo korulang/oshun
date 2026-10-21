@@ -7,6 +7,7 @@
 // The question the pair answers: in the tilted capture, does depth read
 // as SPATIAL ORDER (fresh low and large, stale high and small near the
 // horizon), or is it still just smaller boxes?
+import libs/host
 import libs/metal
 import std/store
 import std/io
@@ -61,7 +62,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni tilt — automation
         |> if (world.frame == 340)
             | then |> libs/metal:window.snap(path: "/tmp/omni_tilt_tilted.bmp")
         |> if (world.frame == 345)
-            | then |> libs/metal:quit()
+            | then |> libs/host:quit()
     ! key-down k when k.code == 124
         |> std/store:stored { world.focus: if (world.focus + 1 >= world.n) 0 else world.focus + 1 }
         |> std/store:query(res)
@@ -71,7 +72,7 @@ libs/metal:window.open(width: 720, height: 460, title: "omni tilt — automation
         |> std/store:stored { world.tiltT: if (world.tiltT == 0) 1 else 0 }
     ! key-down k when k.code == 2
         |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
-    ! key-down k when k.code == 53 |> libs/metal:quit()
-    ! close |> libs/metal:quit()
+    ! key-down k when k.code == 53 |> libs/host:quit()
+    ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("tilt_snap: closed")
 | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
