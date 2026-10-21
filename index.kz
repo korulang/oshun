@@ -6,7 +6,7 @@
 // transform emits plain std.store inserts, so markup-only consumers pull
 // no @cImport into their backend.
 //
-//   libs/oshun:component(seed, spec) {
+//   oshun:component(seed, spec) {
 //       <panel ws="star" dir="ttb" gap="14">
 //           <text tx="control gallery" fs="15"/>
 //           <tab tx="alpha" uid="200"/>
