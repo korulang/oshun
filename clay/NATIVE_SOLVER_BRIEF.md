@@ -372,6 +372,32 @@ parity — the divergence lived below the projection, in what name the
 compiler resolved the draw's arguments to. The pixel oracle is now a
 standing consumer-path check alongside the stream gate.
 
+SCENE BENCH (2026-10-21 — `clay/tests/bench_scene.k`, the first race on
+the REAL ui scene rather than the fuzz corpus): spec_bench's store +
+seed rows verbatim, the shared expansion pass as lap 1, both solvers
+interleaved per pass (climb warmup 30 + 300 × 3, lowest median),
+ReleaseFast. Correctness basis: this exact scene is already
+pixel-identical (spec_snap_nl BMP) and cmd counts match 20/20. Numbers
+(ms/frame, 3 runs — medians stable, one nl-solve outlier at 0.0151):
+
+| lap | clay | nl |
+|---|---|---|
+| expand (shared) | 0.021 | (same pass) |
+| declare | 0.0019 | 0.0015 |
+| solve | 0.0118 | 0.0097 |
+| drain | ~0 | ~0 |
+
+nl leads both solver laps (~18% solve, ~22% declare) and ~7%
+end-to-end (0.032 vs 0.035 incl. shared expansion). But the finding
+that matters more than the ratio: **the expansion pass (0.021) costs
+more than either pipeline's decl+solve combined** — on a real scene,
+the solver swap moves ~2µs of a ~35µs frame. The dominant per-frame
+cost is the app-side spec walk (queries + measure + fold), which
+neither solver owns. That sharpens §5's bet: the real payoff is a
+solver that walks retained rows directly (expansion + declare fold
+into the solve) or the paused-pump dirty gating — not the solver swap
+alone, which is now proven correct everywhere it was measured.
+
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
 > attack the bet in §5 before building it: find the trap the brief missed,
@@ -653,6 +679,7 @@ Known traps, ranked:
 | `clay/tests/bench_boxes_cmp.py` | comparator, 0.005pt/0.002 tolerances |
 | `clay/tests/spec_snap.k`, `spec_tree.k` | pixel oracles (byte-identical BMP requirement) |
 | `clay/tests/spec_snap_nl.k` | consumer-path pixel oracle: spec_snap twin through nl (byte-identical BMP vs spec_snap) |
+| `clay/tests/bench_scene.k` | scene bench: real ui scene (spec_bench store+rows), interleaved clay/nl, climb laps |
 | `metal/index.kz` | draw ops, instance format (kind 0 quad/1 text/2 shadow/3 image), `frames|zig` pump |
 | nanoui clone `/tmp/nanoui-check` | `hillclimb/` harness (may need re-clone — /tmp is scratch); `src/ui/layout.zig` = the 318-line reference |
 
