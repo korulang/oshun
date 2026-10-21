@@ -300,6 +300,10 @@ Two findings, both real:
 Verdict on the full corpus: nl's solver is ~9% faster and the frame
 LOSES by ~8x end-to-end — the measure cache is the whole story, and it
 is the next honest port, not a reason to switch or abandon.
+Attribution verified by isolation: same corpus with text rows skipped
+(kind==3 undrawn) gives clay 0.251/0.503/~0 vs nl 0.178/0.379/~0 —
+nl ahead on every lap and ~25% ahead on the frame. The deficit is the
+~600 Core Text shaping calls, nothing else.
 
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
