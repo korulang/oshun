@@ -92,13 +92,6 @@ pub const Native = struct {
     // measureTextHashMap living in InitializePersistentMemory.
     mcache: std.AutoHashMapUnmanaged(u64, MEnt) = .{},
     mwords: std.ArrayListUnmanaged(Wd) = .{},
-    // Persistent emitted-box map — survives nl.layout, mirroring Clay's
-    // layoutElementsHashMap boundingBox: read by floating-attach and
-    // clip-scissor resolution, so a parent/clip that hasn't emitted yet
-    // this frame resolves against the PREVIOUS frame's box (or zero on
-    // frame 1). Keyed by element index — nl's stand-in for Clay's element
-    // id; stable for identical declaration streams.
-    pboxes: std.AutoHashMapUnmanaged(i32, [4]f32) = .{},
 };
 
 // Sizing kinds — same ordinals as the clay binding (sizing()).
@@ -200,8 +193,7 @@ const El = struct {
     par: i32 = -1,
     bx: f32 = 0,
     by: f32 = 0,
-    // emitted bounding box (clay.h:3100 — post-expand, written at DFS visit;
-    // mirrored into n.pboxes for attach/clip resolution next frame)
+    // emitted bounding box (clay.h:3100 — post-expand, written at DFS visit)
     ebx: f32 = 0,
     eby: f32 = 0,
     ebw: f32 = 0,
@@ -760,28 +752,7 @@ const Root = struct { el: i32, par: i32, clip: i32, zi: i32 };
 // Position + command emission — the final DFS per root. Roots walk in
 // stable zIndex order — clay.h:2712's bubble sort (strict-< swap ⇒ stable,
 // declaration order preserved among equal keys).
-fn emitCommands(n: *Native) void {
-    var dfs = std.ArrayListUnmanaged(Node){};
-    defer dfs.deinit(alloc);
-    var order = std.ArrayListUnmanaged(Root){};
-    defer order.deinit(alloc);
-    order.appendSlice(alloc, n.roots.items) catch @panic("nl: OOM");
-    var sortMax: usize = order.items.len;
-    while (sortMax > 1) {
-        sortMax -= 1;
-        var i: usize = 0;
-        while (i < sortMax) : (i += 1) {
-            if (order.items[i + 1].zi < order.items[i].zi) {
-                const tmp = order.items[i];
-                order.items[i] = order.items[i + 1];
-                order.items[i + 1] = tmp;
-            }
-        }
-    }
-    // clay.h: the implicit root container's emitted bbox is {0,0,W,H} — it is
-    // written when the main DFS starts, so floating roots that sort before it
-    // (negative zIndex) resolve ROOT attach against a zero box.
-    for (order.items) |rent| {
+fn runRoot(n: *Native, dfs: *std.ArrayListUnmanaged(Node), rent: Root) void {
         const ri = rent.el;
         dfs.clearRetainingCapacity();
         const root = &n.els.items[@intCast(ri)];
@@ -789,20 +760,19 @@ fn emitCommands(n: *Native) void {
         var py: f32 = 0;
         if (root.fat != 0) {
             // Attach resolution (clay.h:2739): the parent's attach point lands
-            // on the element's attach point, plus offset — against the stored
-            // parent's EMITTED bbox (post-expand; a zero box if the parent
-            // hasn't emitted yet, mirroring GetHashMapItem on a stale id).
+            // on the element's attach point, plus offset — against the
+            // parent's emitted bbox (post-expand), filled by the
+            // declaration-order position pre-pass or the implicit-root seed.
             var pbx: f32 = 0;
             var pby: f32 = 0;
             var pw: f32 = 0;
             var ph: f32 = 0;
             if (rent.par >= 0) {
-                if (n.pboxes.get(rent.par)) |pb| {
-                    pbx = pb[0];
-                    pby = pb[1];
-                    pw = pb[2];
-                    ph = pb[3];
-                }
+                const pe = &n.els.items[@intCast(rent.par)];
+                pbx = pe.ebx;
+                pby = pe.eby;
+                pw = pe.ebw;
+                ph = pe.ebh;
             }
             const pcol = @divTrunc(root.fap, 3);
             const prow = @mod(root.fap, 3);
@@ -818,10 +788,11 @@ fn emitCommands(n: *Native) void {
             py = ay + root.fy;
         }
         // The entry's stored clip wraps this subtree's DFS in a SCISSOR pair
-        // using the clip element's emitted bbox (clay.h:2793, :3198) — a clip
-        // that hasn't emitted yields a zero box, which is NOT offscreen.
+        // using the clip element's emitted bbox (clay.h:2793, :3198) — filled
+        // by the pre-pass or the implicit-root seed before this runs.
         if (rent.clip >= 0) {
-            const cb = n.pboxes.get(rent.clip) orelse .{ 0, 0, 0, 0 };
+            const ce2 = &n.els.items[@intCast(rent.clip)];
+            const cb = [4]f32{ ce2.ebx, ce2.eby, ce2.ebw, ce2.ebh };
             if (!offscreen(n, cb[0], cb[1], cb[2], cb[3])) {
                 n.cmds.append(alloc, .{ .kind = 5, .x = cb[0], .y = cb[1], .w = cb[2], .h = cb[3], .zi = rent.zi }) catch @panic("nl: OOM");
             }
@@ -913,10 +884,6 @@ fn emitCommands(n: *Native) void {
             e.eby = eby;
             e.ebw = ebw;
             e.ebh = ebh;
-            // clay.h:3100 — the emitted box lands in the persistent map at
-            // DFS visit; later attach/clip resolutions this frame read it,
-            // next frame's early roots read it stale.
-            n.pboxes.put(alloc, node.el, .{ ebx, eby, ebw, ebh }) catch @panic("nl: OOM");
             const offs = offscreen(n, ebx, eby, ebw, ebh);
             if (!offs) {
                 if (e.is_text) {
@@ -1023,10 +990,73 @@ fn emitCommands(n: *Native) void {
             }
         }
         if (rent.clip >= 0) {
-            const cb = n.pboxes.get(rent.clip) orelse .{ 0, 0, 0, 0 };
+            const ce2 = &n.els.items[@intCast(rent.clip)];
+            const cb = [4]f32{ ce2.ebx, ce2.eby, ce2.ebw, ce2.ebh };
             if (!offscreen(n, cb[0], cb[1], cb[2], cb[3])) {
                 n.cmds.append(alloc, .{ .kind = 6 }) catch @panic("nl: OOM");
             }
+        }
+    }
+
+fn emitCommands(n: *Native) void {
+    var dfs = std.ArrayListUnmanaged(Node){};
+    defer dfs.deinit(alloc);
+    var order = std.ArrayListUnmanaged(Root){};
+    defer order.deinit(alloc);
+    order.appendSlice(alloc, n.roots.items) catch @panic("nl: OOM");
+    var sortMax: usize = order.items.len;
+    while (sortMax > 1) {
+        sortMax -= 1;
+        var i: usize = 0;
+        while (i < sortMax) : (i += 1) {
+            if (order.items[i + 1].zi < order.items[i].zi) {
+                const tmp = order.items[i];
+                order.items[i] = order.items[i + 1];
+                order.items[i + 1] = tmp;
+            }
+        }
+    }
+    // clay.h: the implicit root container's emitted bbox is {0,0,W,H} — it is
+    // written when the main DFS starts, so floating roots that sort before it
+    // (negative zIndex) resolve ROOT attach against a zero box.
+    // The implicit root's emitted box is a layout constant — seed it
+    // so ROOT attach and clip-to-root resolve correctly even before
+    // its own DFS visit (Clay reads the same constant from its hashmap).
+    {
+        const r0 = &n.els.items[0];
+        r0.ebx = 0;
+        r0.eby = 0;
+        r0.ebw = n.w;
+        r0.ebh = n.h;
+    }
+    // Attach/clip resolution reads the target's emitted box — the position
+    // its commands actually render at — filled for every element by the
+    // silent declaration-order pass below. Declaration order materializes
+    // the rendered position: a containing root is registered (and walked)
+    // before the clip/floating roots nested inside its subtree, so the
+    // detached rendering pass writes eb last for elements that live in a
+    // detached frame. Parents and clip ancestors always precede their
+    // dependents. Skipped when no root attaches to or clips against
+    // another element.
+    var need_pos = false;
+    for (n.roots.items) |re| {
+        if (re.par > 0 or re.clip >= 0) {
+            need_pos = true;
+            break;
+        }
+    }
+    var pass: u8 = if (need_pos) 0 else 1;
+    while (pass < 2) : (pass += 1) {
+        var saved: @TypeOf(n.cmds) = undefined;
+        if (pass == 0) {
+            saved = n.cmds;
+            n.cmds = .{};
+        }
+        const seq = if (pass == 1) order.items else n.roots.items;
+        for (seq) |rent| runRoot(n, &dfs, rent);
+        if (pass == 0) {
+            n.cmds.deinit(alloc);
+            n.cmds = saved;
         }
     }
 }
@@ -1094,7 +1124,6 @@ fn solve(n: *Native) void {
     cl.lines.deinit($mod.std.heap.page_allocator);
     cl.cmds.deinit($mod.std.heap.page_allocator);
     cl.mcache.deinit($mod.std.heap.page_allocator);
-    cl.pboxes.deinit($mod.std.heap.page_allocator);
     cl.mwords.deinit($mod.std.heap.page_allocator);
     $mod.std.heap.page_allocator.destroy(cl);
 }

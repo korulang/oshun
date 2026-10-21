@@ -53,7 +53,25 @@ ReleaseFast).
 The durable belief stands: declare which frame a correctness or
 performance claim measured. What changed is the gate's reach — cold
 AND warm streams are both certified now, and "nl matches Clay" means
-both. The stale-box quirk is mirrored for parity; whether it should
-remain mirrored (it is arguably upstream-undesirable) is a betterment
-decision that can now be taken deliberately, because the instrument
-that would catch regressing from it exists.
+both.
+
+Follow-on ruling (same day): the open betterment decision was taken.
+Under "fix bugs over parity — nothing to support yet", the `pboxes`
+staleness mirror came back out and the gate's comparison target became
+Clay's CONVERGED stream (REF2, verified stable by REF3), not frame 1.
+nl resolves attach/clip against the target's RENDERED box — filled by
+a silent declaration-order pre-pass, which materializes the rendered
+position because a containing root is registered (and walked) before
+the clip/floating roots nested inside it, so the detached rendering
+pass writes `eb` last for elements in a detached frame. The deeper
+finding: Clay's converged map is neither "the hierarchical box" nor
+"the emitted box" — it is zi-order last-writer, arbitrarily mixing
+document-space and detached-frame boxes for double-visited clip
+elements. Two divergences adjudicated in opposite directions proved
+it: el438's converged map held hierarchical (clay culls ud=569 whose
+parent renders at detached origin — nl's (247,2) emission is correct),
+while el375's held detached (clay shows the ud=482 subtree onscreen —
+matching the rendered box). The gate encodes this as an explicit
+ADJUDICATED set: CAND must equal REF2 PLUS exactly the ud=569 pair —
+correctness over parity without giving up the oracle's ability to say
+no to anything new.
