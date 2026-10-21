@@ -17,10 +17,14 @@ Per-kind field rules (matching what consumers actually read):
   cd d=           : kind 9 only as payload; compared everywhere — a
                     candidate leaking nonzero d= on other kinds fails
   fs f=, tx=      : kind 3 only (fs tol 0.001, tx exact)
-  corner cr=      : kinds 1 (RECT), 4 (IMAGE), and 9 (CUSTOM —
+  corner cr=      : kinds 1 (RECT), 2 (BORDER — border.cornerRadius
+                    shares the union head), 4 (IMAGE), and 9 (CUSTOM —
                     custom.cornerRadius sits at the same union offset) —
                     other kinds carry zeroed bytes (or, for text, are
                     guarded to 0 in `each`), compared exact at %.2f
+  border bw=      : kind 2 only — border.width {left,right,top,bottom,
+                    betweenChildren}; betweenChildren>0 also emits k=1
+                    RECTs between children (compared via r=)
 
 Usage: fuzz_cmp.py <dump>
 Exit 0 only if CAND matches REF *and* MUT diverges from REF."""
@@ -29,7 +33,8 @@ import re, sys
 pat = re.compile(
     r"^cmd k=(\d+) ud=(-?\d+) r=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
     r" c=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
-    r" i=(-?\d+) d=(-?\d+) f=([-\d.]+) cr=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+) tx=(.*)$")
+    r" i=(-?\d+) d=(-?\d+) f=([-\d.]+) cr=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
+    r" bw=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+) tx=(.*)$")
 
 def parse(path):
     secs, cur = {}, None
@@ -49,7 +54,8 @@ def parse(path):
                                   c=[float(g[6]), float(g[7]), float(g[8]), float(g[9])],
                                   i=int(g[10]), d=int(g[11]), f=float(g[12]),
                                   cr=[float(g[13]), float(g[14]), float(g[15]), float(g[16])],
-                                  tx=g[17]))
+                                  bw=[float(g[17]), float(g[18]), float(g[19]), float(g[20]), float(g[21])],
+                                  tx=g[22]))
     return secs
 
 def cmp_rows(a, b, label):
@@ -65,14 +71,18 @@ def cmp_rows(a, b, label):
         for j, (u, v) in enumerate(zip(x["r"], y["r"])):
             if abs(u - v) > 0.001:
                 fails.append(f"{label}[{idx}]: rect[{j}] {u} vs {v} (d={u-v:+.4f})")
-        if x["k"] in (1, 3, 7, 9):
+        if x["k"] in (1, 2, 3, 7, 9):
             for j, (u, v) in enumerate(zip(x["c"], y["c"])):
                 if abs(u - v) > 0.002:
                     fails.append(f"{label}[{idx}]: color[{j}] {u} vs {v} (d={u-v:+.4f})")
-        if x["k"] in (1, 4, 9):
+        if x["k"] in (1, 2, 4, 9):
             for j, (u, v) in enumerate(zip(x["cr"], y["cr"])):
                 if abs(u - v) > 0.005:
                     fails.append(f"{label}[{idx}]: corner[{j}] {u} vs {v} (d={u-v:+.4f})")
+        if x["k"] == 2:
+            for j, (u, v) in enumerate(zip(x["bw"], y["bw"])):
+                if abs(u - v) > 0.001:
+                    fails.append(f"{label}[{idx}]: bw[{j}] {u} vs {v}")
         if x["k"] == 4 and x["i"] != y["i"]:
             fails.append(f"{label}[{idx}]: img {x['i']} vs {y['i']}")
         if x["d"] != y["d"]:

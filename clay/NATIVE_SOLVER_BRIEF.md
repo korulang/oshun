@@ -45,10 +45,14 @@ unconditionally and extends c=/cr= to kind 9 — custom shares the
 decl.aspectRatio / El.ar; chained two-directional solve — close-time
 fill, post-X h=w/ar + hmx lock, post-Y w=ar·h, mirroring
 Clay__UpdateAspectRatioBox's four call sites; MUT adds +mut to ar on
-every element).
+every element), BORDERS (br..ba + bwl/bwr/bwt/bwb/bwc →
+decl.border.{color,width} / El.br..bwc; kind 2 emits on pop before
+OVERLAY_END/SCISSOR_END, betweenChildren>0 emits interleaved k=1 RECTs
+walking child dims + gap; integer-division halves — childGap and
+betweenChildren are u16 so their /2 truncates, nl mirrors; CmdView +5
+bw fields; comparator compares c=/cr=/bw= on kind 2).
 ABSENT,
-additive ports — borders (+betweenChildren),
-letterSpacing/
+additive ports — letterSpacing/
 lineHeight/fontId, wrap NEWLINES/NONE, textAlignment, attachPoints 9×9,
 attachTo PARENT/clipTo, expand, zIndex, pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
@@ -124,6 +128,22 @@ rejected with 1466 divergences; smoke, gallery, gallery_comp,
 bench_solvers, folder_snap green. Operational note: zig caches the
 clay_impl.c TU without noticing clay.h edits — bump the .c file when
 iterating on the header.
+
+growth 2026-10-21 — borders: sixth capability cycle, the widest emit
+path so far. el.cfg/el.clip/el.img/el.custom + nl.el.* each gained
+br..ba + bwl/bwr/bwt/bwb/bwc (independent border color, matching
+Clay's decl.border.{color,width}). Kind 2 emits at pop before
+OVERLAY_END/SCISSOR_END; betweenChildren>0 && color.a>0 emits k=1
+RECTs between children, offset = pad - gap/2 - bw/2 accumulated over
+child dims — clay.h halves childGap and betweenChildren as INTEGER
+division (u16), and nl initially floored differently: four divergences
+at exactly ±0.5/±1.0 caught by the gate. First corpus draw had three
+of five width columns dead (divisor too large for the mod window) —
+gate coverage claims need a draw audit, not just a param. Corpus: 213
+BORDER cmds, all five width columns nonzero, 68 betweenChildren.
+Receipt: GATE PASS — CAND==REF over 813 cmds; MUT rejected with 2716
+divergences; smoke, gallery, gallery_comp, bench_solvers, folder_snap
+green.
 
 landmine found 2026-10-20 — nl first lived as `~part native` of libs/clay.
 ~parts elaborate EAGERLY into every consumer: gallery_comp (never touches

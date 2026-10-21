@@ -159,6 +159,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc el.cfg|zig {
@@ -182,6 +184,10 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
     decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
+    decl.border = .{
+        .color = .{ .r = @floatCast(br), .g = @floatCast(bg), .b = @floatCast(bb), .a = @floatCast(ba) },
+        .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
+    };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -206,6 +212,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc el.img|zig {
@@ -220,6 +228,10 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
     decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
+    decl.border = .{
+        .color = .{ .r = @floatCast(br), .g = @floatCast(bg), .b = @floatCast(bb), .a = @floatCast(ba) },
+        .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
+    };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -244,6 +256,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc el.custom|zig {
@@ -258,6 +272,10 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
     decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
+    decl.border = .{
+        .color = .{ .r = @floatCast(br), .g = @floatCast(bg), .b = @floatCast(bb), .a = @floatCast(ba) },
+        .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
+    };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
     if (fl != 0) {
         decl.floating = .{
@@ -302,6 +320,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -325,6 +345,10 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     decl.overlayColor = .{ .r = @floatCast(ovr), .g = @floatCast(ovg), .b = @floatCast(ovb), .a = @floatCast(ova) };
     decl.cornerRadius = .{ .topLeft = @floatCast(crtl), .topRight = @floatCast(crtr), .bottomLeft = @floatCast(crbl), .bottomRight = @floatCast(crbr) };
     decl.aspectRatio = .{ .aspectRatio = @floatCast(ar) };
+    decl.border = .{
+        .color = .{ .r = @floatCast(br), .g = @floatCast(bg), .b = @floatCast(bb), .a = @floatCast(ba) },
+        .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
+    };
     decl.clip = .{
         .horizontal = horiz != 0,
         .vertical = vert != 0,
@@ -393,6 +417,11 @@ pub const CmdView = struct {
     ctr: f64,
     cbl: f64,
     cbr: f64,
+    bwl: f64,
+    bwr: f64,
+    bwt: f64,
+    bwb: f64,
+    bwc: f64,
 };
 
 // Rendered-content dims — what a string occupies at a point size under the
@@ -454,6 +483,16 @@ pub const Dims = struct {
             .ctr = if (is_text) 0.0 else @as(f64, __rc.renderData.rectangle.cornerRadius.topRight),
             .cbl = if (is_text) 0.0 else @as(f64, __rc.renderData.rectangle.cornerRadius.bottomLeft),
             .cbr = if (is_text) 0.0 else @as(f64, __rc.renderData.rectangle.cornerRadius.bottomRight),
+            .bwl = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
+                @as(f64, @floatFromInt(__rc.renderData.border.width.left)) else 0.0,
+            .bwr = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
+                @as(f64, @floatFromInt(__rc.renderData.border.width.right)) else 0.0,
+            .bwt = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
+                @as(f64, @floatFromInt(__rc.renderData.border.width.top)) else 0.0,
+            .bwb = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
+                @as(f64, @floatFromInt(__rc.renderData.border.width.bottom)) else 0.0,
+            .bwc = if (__rc.commandType == $mod.c.CLAY_RENDER_COMMAND_TYPE_BORDER)
+                @as(f64, @floatFromInt(__rc.renderData.border.width.betweenChildren)) else 0.0,
         });
     }
     return .{ .drained = .{} };

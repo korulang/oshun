@@ -131,6 +131,15 @@ const El = struct {
     img: usize = 0,
     cd: usize = 0,
     ar: f32 = 0,
+    br: f32 = 0,
+    bg: f32 = 0,
+    bb: f32 = 0,
+    ba: f32 = 0,
+    bwl: u16 = 0,
+    bwr: u16 = 0,
+    bwt: u16 = 0,
+    bwb: u16 = 0,
+    bwc: u16 = 0,
     ud: usize = 0,
     is_text: bool = false,
     tx: []const u8 = "",
@@ -182,6 +191,11 @@ const Cmd = struct {
     ctr: f32 = 0,
     cbl: f32 = 0,
     cbr: f32 = 0,
+    bwl: f32 = 0,
+    bwr: f32 = 0,
+    bwt: f32 = 0,
+    bwb: f32 = 0,
+    bwc: f32 = 0,
 };
 
 const alloc = std.heap.page_allocator;
@@ -682,6 +696,44 @@ fn emitCommands(n: *Native) void {
                 dfs.items.len -= 1;
                 if (e.is_text) continue;
                 if (!offscreen(n, e.bx, e.by, e.dw, e.dh)) {
+                    // BORDER + betweenChildren rects emit on pop, before
+                    // OVERLAY_END/SCISSOR_END — matching clay.h's DFS-return order.
+                    if (e.bwl > 0 or e.bwr > 0 or e.bwt > 0 or e.bwb > 0 or e.bwc > 0) {
+                        n.cmds.append(alloc, .{ .kind = 2, .x = e.bx, .y = e.by, .w = e.dw, .h = e.dh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr, .bwl = @floatFromInt(e.bwl), .bwr = @floatFromInt(e.bwr), .bwt = @floatFromInt(e.bwt), .bwb = @floatFromInt(e.bwb), .bwc = @floatFromInt(e.bwc) }) catch @panic("nl: OOM");
+                        if (e.bwc > 0 and e.ba > 0) {
+                            const gap: f32 = @floatFromInt(e.gap);
+                            // childGap and betweenChildren are u16 in clay.h —
+                            // their halves are integer divisions, not float.
+                            const halfGap: f32 = @floatFromInt(e.gap / 2);
+                            const halfW: f32 = @floatFromInt(e.bwc / 2);
+                            var sx: f32 = 0;
+                            var sy: f32 = 0;
+                            if (e.ch or e.cv) {
+                                sx = e.ox;
+                                sy = e.oy;
+                            }
+                            var offx = @as(f32, @floatFromInt(e.padl)) - halfGap;
+                            var offy = @as(f32, @floatFromInt(e.padt)) - halfGap;
+                            const kids = n.kids.items[@intCast(e.fc)..@intCast(e.fc + e.nc)];
+                            if (e.dir == LTR) {
+                                for (kids, 0..) |ki, i| {
+                                    const ce = &n.els.items[@intCast(ki)];
+                                    if (i > 0) {
+                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.bx + offx + sx - halfW, .y = e.by + sy, .w = @floatFromInt(e.bwc), .h = e.dh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
+                                    }
+                                    offx += ce.dw + gap;
+                                }
+                            } else {
+                                for (kids, 0..) |ki, i| {
+                                    const ce = &n.els.items[@intCast(ki)];
+                                    if (i > 0) {
+                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.bx + sx, .y = e.by + offy + sy - halfW, .w = e.dw, .h = @floatFromInt(e.bwc), .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
+                                    }
+                                    offy += ce.dh + gap;
+                                }
+                            }
+                        }
+                    }
                     if (e.ova > 0) {
                         n.cmds.append(alloc, .{ .kind = 8, .ud = e.ud }) catch @panic("nl: OOM");
                     }
@@ -910,6 +962,8 @@ fn solve(n: *Native) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc nl.el.cfg|zig {
@@ -942,6 +996,15 @@ fn solve(n: *Native) void {
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
     e.ar = @floatCast(ar);
+    e.br = @floatCast(br);
+    e.bg = @floatCast(bg);
+    e.bb = @floatCast(bb);
+    e.ba = @floatCast(ba);
+    e.bwl = @intCast(@min(@max(bwl, 0), 65535));
+    e.bwr = @intCast(@min(@max(bwr, 0), 65535));
+    e.bwt = @intCast(@min(@max(bwt, 0), 65535));
+    e.bwb = @intCast(@min(@max(bwb, 0), 65535));
+    e.bwc = @intCast(@min(@max(bwc, 0), 65535));
     e.ud = @intCast(@as(u64, @bitCast(eid)));
     if (fl != 0) {
         e.fl = 1;
@@ -960,6 +1023,8 @@ fn solve(n: *Native) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc nl.el.img|zig {
@@ -979,6 +1044,15 @@ fn solve(n: *Native) void {
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
     e.ar = @floatCast(ar);
+    e.br = @floatCast(br);
+    e.bg = @floatCast(bg);
+    e.bb = @floatCast(bb);
+    e.ba = @floatCast(ba);
+    e.bwl = @intCast(@min(@max(bwl, 0), 65535));
+    e.bwr = @intCast(@min(@max(bwr, 0), 65535));
+    e.bwt = @intCast(@min(@max(bwt, 0), 65535));
+    e.bwb = @intCast(@min(@max(bwb, 0), 65535));
+    e.bwc = @intCast(@min(@max(bwc, 0), 65535));
     if (fl != 0) {
         e.fl = 1;
         e.fx = @floatCast(fx);
@@ -999,6 +1073,8 @@ fn solve(n: *Native) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
 }
 
 ~proc nl.el.custom|zig {
@@ -1018,6 +1094,15 @@ fn solve(n: *Native) void {
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
     e.ar = @floatCast(ar);
+    e.br = @floatCast(br);
+    e.bg = @floatCast(bg);
+    e.bb = @floatCast(bb);
+    e.ba = @floatCast(ba);
+    e.bwl = @intCast(@min(@max(bwl, 0), 65535));
+    e.bwr = @intCast(@min(@max(bwr, 0), 65535));
+    e.bwt = @intCast(@min(@max(bwt, 0), 65535));
+    e.bwb = @intCast(@min(@max(bwb, 0), 65535));
+    e.bwc = @intCast(@min(@max(bwc, 0), 65535));
     if (fl != 0) {
         e.fl = 1;
         e.fx = @floatCast(fx);
@@ -1034,6 +1119,8 @@ fn solve(n: *Native) void {
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
     ar: f64,
+    br: f64, bg: f64, bb: f64, ba: f64,
+    bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -1062,6 +1149,15 @@ fn solve(n: *Native) void {
     e.cbl = @floatCast(crbl);
     e.cbr = @floatCast(crbr);
     e.ar = @floatCast(ar);
+    e.br = @floatCast(br);
+    e.bg = @floatCast(bg);
+    e.bb = @floatCast(bb);
+    e.ba = @floatCast(ba);
+    e.bwl = @intCast(@min(@max(bwl, 0), 65535));
+    e.bwr = @intCast(@min(@max(bwr, 0), 65535));
+    e.bwt = @intCast(@min(@max(bwt, 0), 65535));
+    e.bwb = @intCast(@min(@max(bwb, 0), 65535));
+    e.bwc = @intCast(@min(@max(bwc, 0), 65535));
     e.ch = horiz != 0;
     e.cv = vert != 0;
     e.ox = @floatCast(ox);
@@ -1146,6 +1242,11 @@ fn solve(n: *Native) void {
             .ctr = rc.ctr,
             .cbl = rc.cbl,
             .cbr = rc.cbr,
+            .bwl = rc.bwl,
+            .bwr = rc.bwr,
+            .bwt = rc.bwt,
+            .bwb = rc.bwb,
+            .bwc = rc.bwc,
         });
     }
     return .{ .drained = .{} };
