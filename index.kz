@@ -1,6 +1,6 @@
-// @korulang/oshun — the OMNI markup language. Oshun is the authoring
-// surface: the markup inside `oshun:component`'s braces, named for the
-// orisha of aesthetics — the design layer over the OMNI panel dialect.
+// @korulang/oshun — the markup language OMNI consumes. Oshun is the
+// authoring surface: the markup inside `oshun:component`'s braces,
+// named for the orisha of aesthetics — the design layer under the app.
 // This package owns MARKUP → spec-row seeds; libs/ui owns WORDS → solver
 // numerics; libs/clay owns the solver. No solver dependency — the
 // transform emits plain std.store inserts, so markup-only consumers pull
