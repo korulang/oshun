@@ -93,6 +93,32 @@ pub fn ensureApp() Id {
     return app;
 }
 
+// An unbundled binary launches with no real activation policy: its
+// windows can look key while the process never owns a menu bar — under
+// auto-hide the reveal zone stays dead because there is no bar to
+// reveal to. Windowed apps must declare Regular; tray-only apps declare
+// Accessory (an agent: status item, no dock icon, no bar). The last
+// call wins, so window.open after tray.new upgrades cleanly.
+//   0 = NSApplicationActivationPolicyRegular
+//   1 = NSApplicationActivationPolicyAccessory
+pub fn setActivationPolicy(p: i64) void {
+    send1(void, i64, ensureApp(), sel("setActivationPolicy:"), p);
+}
+
+// Windowed activation: Regular policy, a minimal main menu so the bar
+// has something to own (until the menu verb exists, an empty NSMenu is
+// enough — AppKit draws the app-name menu around it), and activate so
+// the frontmost app is actually us.
+pub fn activateRegular() Id {
+    const app = ensureApp();
+    setActivationPolicy(0);
+    if (send(Id, app, sel("mainMenu")) == null) {
+        send1(void, Id, app, sel("setMainMenu:"), send(Id, send(Id, cls("NSMenu"), sel("alloc")), sel("init")));
+    }
+    send1(void, bool, app, sel("activateIgnoringOtherApps:"), true);
+    return app;
+}
+
 // ============================================================================
 // Tray mailbox — the ObjC ↔ Koru boundary for host-chrome events. ObjC IMPs
 // are plain C functions: they cannot call Koru effect arms, so they PUSH
@@ -215,7 +241,14 @@ pub const Tray = struct {
     const pool = objc_autoreleasePoolPush();
     defer objc_autoreleasePoolPop(pool);
 
-    _ = ensureApp();
+    const app = ensureApp();
+    // A status item is agent UI — declare Accessory so a tray-only app
+    // never claims the menu bar. Never downgrade: a window.open that
+    // already ran made us Regular, and the bar is worth more than the
+    // agent flag. window.open itself upgrades unconditionally.
+    if (send(i64, app, sel("activationPolicy")) != 0) {
+        setActivationPolicy(1);
+    }
 
     const tc = ensureTrayClass() orelse {
         return .{ .err = "host: KoruTrayTarget class registration failed" };

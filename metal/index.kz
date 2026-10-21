@@ -1440,8 +1440,10 @@ fn buildPipelines(device: Id) error{
     const pool = objc_autoreleasePoolPush();
     defer objc_autoreleasePoolPop(pool);
 
-    const app = H.ensureApp();
-    _ = send1(bool, i64, app, sel("setActivationPolicy:"), 0);
+    // Regular policy + a minimal mainMenu + activate: without them the
+    // auto-hidden menu bar's reveal zone has no bar to reveal to, even
+    // while this window looks focused.
+    const app = H.activateRegular();
 
     const rect = NSRect{
         .origin = .{ .x = 0, .y = 0 },
