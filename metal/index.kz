@@ -831,6 +831,17 @@ pub const ScrollData = struct {
     dy: f64,
 };
 
+// A status-item event. `tray` is the tray.new registration slot, `tag` the
+// NSMenuItem tag (integer `when` matching, no string compare), `action` its
+// representedObject — valid until the mailbox slot wraps, same as
+// KeyData.chars. A bare button click (no menu attached) carries tag -1 and
+// an empty action.
+pub const TrayActionData = struct {
+    tray: i64,
+    tag: i64,
+    action: []const u8,
+};
+
 const Event = union(enum) {
     key_down: KeyData,
     mouse_down: MouseData,
@@ -838,6 +849,7 @@ const Event = union(enum) {
     mouse_move: MouseData,
     mouse_drag: MouseData,
     scroll: ScrollData,
+    tray_action: TrayActionData,
 };
 
 var ev_buf: [64]Event = undefined;
@@ -853,6 +865,19 @@ fn pushKey(kc: u16, chars: []const u8) void {
     const n = @min(chars.len, ev_chars[0].len);
     @memcpy(ev_chars[ev_tail][0..n], chars[0..n]);
     ev_buf[ev_tail] = .{ .key_down = .{ .code = kc, .chars = ev_chars[ev_tail][0..n] } };
+    ev_tail = next;
+}
+
+// Char backing for tray_action events — a parallel ring, same wrap
+// semantics as ev_chars.
+var ev_actions: [64][64]u8 = undefined;
+
+fn pushTrayAction(tray: i64, tag: i64, action: []const u8) void {
+    const next = (ev_tail + 1) % ev_buf.len;
+    if (next == ev_head) return;
+    const n = @min(action.len, ev_actions[0].len);
+    @memcpy(ev_actions[ev_tail][0..n], action[0..n]);
+    ev_buf[ev_tail] = .{ .tray_action = .{ .tray = tray, .tag = tag, .action = ev_actions[ev_tail][0..n] } };
     ev_tail = next;
 }
 
@@ -1006,6 +1031,15 @@ fn dumpDrawable(drawable: Id, win: *Window) void {
 
 ~proc input.scroll|zig {
     pushEvent(.{ .scroll = .{ .x = x, .y = y, .dx = dx, .dy = dy } });
+}
+
+// Automation: a synthesized tray action enters the SAME mailbox the
+// KoruTrayTarget IMPs write — the dispatch-path gate for menu handling
+// that runs without AX trust (input.key's precedent).
+~pub tor tray.action { tray: i64, tag: i64, action: string }
+
+~proc tray.action|zig {
+    pushTrayAction(tray, tag, action);
 }
 
 // Live content size in points — locationInWindow's space. vp_w/vp_h are
@@ -1271,6 +1305,72 @@ fn ensureViewClass() ?objc.Class {
     view_class = c;
     return c;
 }
+
+// ============================================================================
+// Status item — the first host verb (electrobun's createTray shape):
+// an NSStatusBar item plus a runtime-registered KoruTrayTarget NSObject
+// receiving target/action callbacks. Same mailbox discipline as the view
+// IMPs: menuItemClicked:/statusItemClicked: push tray_action, and frames
+// drains it into the `! tray-action` arm. Where electrobun takes a JSON
+// menu tree, items arrive one tor call at a time and match on native
+// NSMenuItem.tag.
+// ============================================================================
+
+const MAX_TRAYS = 8;
+var tray_class: ?objc.Class = null;
+// target instance -> registration slot, consulted by the IMPs. Slots freed
+// by tray.remove go null and are reused by the next tray.new.
+var tray_targets: [MAX_TRAYS]Id = .{null} ** MAX_TRAYS;
+var tray_count: usize = 0;
+
+fn traySlotFor(recv: Id) ?usize {
+    for (0..tray_count) |i| {
+        if (tray_targets[i] == recv) return i;
+    }
+    return null;
+}
+
+fn impStatusItemClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
+    _ = _s;
+    _ = sender;
+    const slot = traySlotFor(recv) orelse return;
+    pushTrayAction(@intCast(slot), -1, "");
+}
+
+fn impMenuItemClicked(recv: Id, _s: SEL, sender: Id) callconv(.c) void {
+    _ = _s;
+    const slot = traySlotFor(recv) orelse return;
+    const tag = send(i64, sender, sel("tag"));
+    var action: []const u8 = &.{};
+    var tmp: [64]u8 = undefined;
+    const robj = send(Id, sender, sel("representedObject"));
+    if (robj != null and CFStringGetCString(robj, &tmp, tmp.len, cf.kCFStringEncodingUTF8)) {
+        action = tmp[0..std.mem.len(@as([*:0]u8, @ptrCast(&tmp)))];
+    }
+    pushTrayAction(@intCast(slot), tag, action);
+}
+
+fn ensureTrayClass() ?objc.Class {
+    if (tray_class) |c| return c;
+    const sup: objc.Class = @ptrCast(cls("NSObject"));
+    const c = objc.objc_allocateClassPair(sup, "KoruTrayTarget", 0) orelse return null;
+    _ = objc.class_addMethod(c, sel("statusItemClicked:"), @ptrCast(&impStatusItemClicked), "v@:@");
+    _ = objc.class_addMethod(c, sel("menuItemClicked:"), @ptrCast(&impMenuItemClicked), "v@:@");
+    objc.objc_registerClassPair(c);
+    tray_class = c;
+    return c;
+}
+
+// The status-item token. `sitem` is the NSStatusItem, `target` the
+// KoruTrayTarget receiving its callbacks, `menu` lazily created by the
+// first tray.item, `slot` the registration index TrayActionData reports.
+// tray.new grants <ready>; tray.remove is the only consumer.
+pub const Tray = struct {
+    sitem: Id,
+    target: Id,
+    menu: ?Id,
+    slot: usize,
+};
 
 // ============================================================================
 // Window lifecycle — the ASYMMETRIC model, same shape as raylib's:
@@ -1591,6 +1691,7 @@ fn buildPipelines(device: Id) error{
 ! ?mouse-move libs/metal:MouseData
 ! ?mouse-drag libs/metal:MouseData
 ! ?scroll libs/metal:ScrollData
+! ?tray-action libs/metal:TrayActionData
 ! ?close
 | done *Window<active!>
 
@@ -1627,6 +1728,7 @@ fn buildPipelines(device: Id) error{
                 .mouse_move => |m| mouse_move(m),
                 .mouse_drag => |m| mouse_drag(m),
                 .scroll => |s| scroll(s),
+                .tray_action => |t| tray_action(t),
             }
         }
         if ($mod.should_quit) break;
@@ -1711,6 +1813,136 @@ fn buildPipelines(device: Id) error{
 
 ~proc window.clear.color|zig {
     win.clear = .{ .red = r, .green = g, .blue = b, .alpha = 1.0 };
+}
+
+// ============================================================================
+// Tray lifecycle. `ready` — fresh from tray.new, items attachable,
+// removable. tray.remove is the only <!ready> consumer.
+// ============================================================================
+
+~pub tor tray.new { title: string }
+| tray *Tray<ready!>
+| err string
+
+~proc tray.new|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+
+    // A tray must not require a window — sharedApplication is idempotent
+    // and finishLaunching twice is harmless (window.open does the same).
+    const app = send(Id, cls("NSApplication"), sel("sharedApplication"));
+    send(void, app, sel("finishLaunching"));
+
+    const tc = ensureTrayClass() orelse {
+        return .{ .err = "metal: KoruTrayTarget class registration failed" };
+    };
+    var slot: usize = MAX_TRAYS;
+    for (0..tray_count) |i| {
+        if (tray_targets[i] == null) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == MAX_TRAYS) {
+        if (tray_count >= MAX_TRAYS) return .{ .err = "metal: tray table full" };
+        slot = tray_count;
+        tray_count += 1;
+    }
+    const target = send(Id, send(Id, @as(Id, @ptrCast(tc)), sel("alloc")), sel("init"));
+
+    const bar = send(Id, cls("NSStatusBar"), sel("systemStatusBar"));
+    const item = send1(Id, f64, bar, sel("statusItemWithLength:"), -1.0); // NSVariableStatusItemLength
+    if (item == null) return .{ .err = "metal: statusItemWithLength failed" };
+    // The bar does NOT retain the item — it is autoreleased, dies when this
+    // proc's pool pops, and sitem dangles into whatever reuses the memory
+    // (electrobun's retainObjCObject is the same discovery). tray.remove
+    // sends the matching release after removeStatusItem:.
+    _ = send(Id, item, sel("retain"));
+
+    var tbuf: [256]u8 = undefined;
+    const titleStr = cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8);
+    const btn = send(Id, item, sel("button"));
+    send1(void, Id, btn, sel("setTitle:"), @as(Id, @ptrCast(@constCast(titleStr))));
+    send1(void, Id, btn, sel("setTarget:"), target);
+    send1(void, SEL, btn, sel("setAction:"), sel("statusItemClicked:"));
+    // LeftMouseUp|RightMouseUp — fires statusItemClicked: only while no
+    // menu is attached; an attached menu owns the click itself.
+    send1(void, u64, btn, sel("sendActionOn:"), 10);
+
+    tray_targets[slot] = target;
+    const t = std.heap.page_allocator.create(Tray) catch @panic("metal: OOM allocating Tray token");
+    t.* = .{ .sitem = item, .target = target, .menu = null, .slot = slot };
+    return .{ .tray = t };
+}
+
+// The status item's menu is created lazily so a click-only tray never pays
+// for one — and so tray.new's button-click path stays live until the first
+// item lands (an attached menu owns the click; AppKit's contract).
+fn ensureMenu(tray: *Tray) void {
+    if (tray.menu != null) return;
+    tray.menu = send(Id, send(Id, cls("NSMenu"), sel("alloc")), sel("init"));
+    send1(void, Id, tray.sitem, sel("setMenu:"), tray.menu.?);
+}
+
+// One menu entry: label shown, `action` carried as representedObject into
+// TrayActionData, `tag` the native NSMenuItem tag for integer matching.
+~pub tor tray.item { tray: *Tray<ready>, label: string, action: string, tag: i64 }
+
+~proc tray.item|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    ensureMenu(tray);
+    var lbuf: [256]u8 = undefined;
+    var abuf: [64]u8 = undefined;
+    var ebuf: [1]u8 = .{0};
+    const labelStr = cf.CFStringCreateWithCString(null, cstr(label, &lbuf), cf.kCFStringEncodingUTF8);
+    const actStr = cf.CFStringCreateWithCString(null, cstr(action, &abuf), cf.kCFStringEncodingUTF8);
+    const emptyStr = cf.CFStringCreateWithCString(null, @as([*:0]const u8, @ptrCast(&ebuf)), cf.kCFStringEncodingUTF8);
+    const mi = send3(
+        Id, Id, SEL, Id,
+        send(Id, cls("NSMenuItem"), sel("alloc")),
+        sel("initWithTitle:action:keyEquivalent:"),
+        @as(Id, @ptrCast(@constCast(labelStr))), sel("menuItemClicked:"), @as(Id, @ptrCast(@constCast(emptyStr))),
+    );
+    send1(void, Id, mi, sel("setTarget:"), tray.target);
+    send1(void, Id, mi, sel("setRepresentedObject:"), @as(Id, @ptrCast(@constCast(actStr))));
+    send1(void, i64, mi, sel("setTag:"), tag);
+    send1(void, Id, tray.menu.?, sel("addItem:"), mi);
+    send(void, mi, sel("release"));
+}
+
+~pub tor tray.sep { tray: *Tray<ready> }
+
+~proc tray.sep|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    ensureMenu(tray);
+    const sep = send(Id, cls("NSMenuItem"), sel("separatorItem"));
+    send1(void, Id, tray.menu.?, sel("addItem:"), sep);
+}
+
+~pub tor tray.title { tray: *Tray<ready>, title: string }
+
+~proc tray.title|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    var tbuf: [256]u8 = undefined;
+    const titleStr = cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8);
+    send1(void, Id, send(Id, tray.sitem, sel("button")), sel("setTitle:"), @as(Id, @ptrCast(@constCast(titleStr))));
+}
+
+~pub tor tray.remove { tray: *Tray<!ready> }
+
+~proc tray.remove|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    const bar = send(Id, cls("NSStatusBar"), sel("systemStatusBar"));
+    send1(void, Id, bar, sel("removeStatusItem:"), tray.sitem);
+    // Balances the retain in tray.new; the target was ours (alloc/init).
+    send(void, tray.sitem, sel("release"));
+    send(void, tray.target, sel("release"));
+    tray_targets[tray.slot] = null;
+    std.heap.page_allocator.destroy(tray);
 }
 
 // ============================================================================

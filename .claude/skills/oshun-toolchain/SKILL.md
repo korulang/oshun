@@ -29,9 +29,13 @@ UI subtree (metal/clay/ui/solver) is inbound from koru-libs.
 
 - `SCENE.md` (repo root) — the north star: oshun is OMNI's whole host
   surface, two API families (content dialect + host verbs), the no-list.
-- koru's `CLAUDE.md`/`AGENTS.md` in `../koru` — the toolchain rules this
-  repo inherits: fix koruc, never route around it; no fallbacks; verify
-  before presenting; measured claims carry falsifying oracles.
+- koru's `CLAUDE.md`/`AGENTS.md` in `../koru` (`~/src/koru`) — the
+  toolchain rules this repo inherits: fix koruc, never route around it;
+  no fallbacks; verify before presenting; measured claims carry
+  falsifying oracles. Toolchain description:
+  `../koru/.claude/skills/koru-toolchain/SKILL.md` (compile, pipeline
+  stages, suite); `../koru/koru-tutorial.md` is the language in a page.
+  Repo-root `AGENTS.md` carries the same pointer.
 
 ## What bites
 
