@@ -1,0 +1,16 @@
+# generated build/test artifacts
+zig-out/
+.zig-cache/
+backend.zig
+backend_output_emitted.zig
+output_emitted.zig
+output_emitted.js
+build.zig
+build_backend.zig
+build_output.zig
+compiler_env.json
+program.ast.json
+a.out
+*.o
+history.jsonl
+.mygo/

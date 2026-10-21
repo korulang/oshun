@@ -1016,7 +1016,7 @@ pub const Size = struct {
     h: f64,
 };
 
-~pub tor window.size { win: *Window<opened|active> } -> koru/metal:Size
+~pub tor window.size { win: *Window<opened|active> } -> libs/metal:Size
 
 ~proc window.size|zig {
     const cv = send(Id, win.win, sel("contentView"));
@@ -1585,12 +1585,12 @@ fn buildPipelines(device: Id) error{
 // default close button just closes); quit() breaks the loop.
 ~pub tor frames { win: *Window<!opened|!active>, count: ?i32 }
 ! frame *Frame<frame!>
-! ?key-down koru/metal:KeyData
-! ?mouse-down koru/metal:MouseData
-! ?mouse-up koru/metal:MouseData
-! ?mouse-move koru/metal:MouseData
-! ?mouse-drag koru/metal:MouseData
-! ?scroll koru/metal:ScrollData
+! ?key-down libs/metal:KeyData
+! ?mouse-down libs/metal:MouseData
+! ?mouse-up libs/metal:MouseData
+! ?mouse-move libs/metal:MouseData
+! ?mouse-drag libs/metal:MouseData
+! ?scroll libs/metal:ScrollData
 ! ?close
 | done *Window<active!>
 

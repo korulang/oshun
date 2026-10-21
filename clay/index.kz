@@ -12,7 +12,7 @@
 //                                             the primitive a DATA-driven walk
 //                                             needs (spec rows carry `d`)
 //     | done *Clay<solved!>                   render commands now readable
-//   clay:each(cl)  ! cmd koru/clay:CmdView   drain the solved command array
+//   clay:each(cl)  ! cmd libs/clay:CmdView   drain the solved command array
 //   clay:drop(cl)                             release arena + token
 //
 // Obligations mirror clay's real contract: elements can only be declared
@@ -31,8 +31,8 @@
     exe.linkLibC();
     exe.linkFramework("CoreText");
     exe.linkFramework("CoreFoundation");
-    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
-    exe.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/koru-libs/clay/clay_impl.c" }, .flags = &.{} });
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
+    exe.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/oshun/clay/clay_impl.c" }, .flags = &.{} });
 }
 
 const std = @import("std");
@@ -360,7 +360,7 @@ pub const Dims = struct {
 
 // Standalone measure — calls the same function clay is registered to use for
 // CLAY_TEXT, so an outside walk and an inside text element agree on size.
-~pub tor measure.text { tx: string, fs: f64 } -> koru/clay:Dims
+~pub tor measure.text { tx: string, fs: f64 } -> libs/clay:Dims
 
 ~proc measure.text|zig {
     const d = $mod.koru_clay_measure(tx.ptr, @intCast(tx.len), fs);
@@ -374,7 +374,7 @@ pub const Dims = struct {
 }
 
 ~pub tor each { cl: *Clay<solved> }
-! cmd koru/clay:CmdView
+! cmd libs/clay:CmdView
 | drained
 
 ~proc each|zig {

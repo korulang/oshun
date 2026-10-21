@@ -6,18 +6,18 @@
     exe.linkLibC();
     exe.linkFramework("CoreText");
     exe.linkFramework("CoreFoundation");
-    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
-    exe.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/koru-libs/clay/clay_impl.c" }, .flags = &.{} });
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
+    exe.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/oshun/clay/clay_impl.c" }, .flags = &.{} });
 }
 
 ~std/compiler:requires {
     exe.linkLibC();
     exe.linkFramework("CoreText");
     exe.linkFramework("CoreFoundation");
-    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
     if (exe.root_module.import_table.get("backend_output")) |mod| {
-        mod.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
-        mod.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/koru-libs/clay/clay_impl.c" }, .flags = &.{} });
+        mod.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
+        mod.addCSourceFile(.{ .file = .{ .cwd_relative = "/Users/larsde/src/oshun/clay/clay_impl.c" }, .flags = &.{} });
     }
 }
 
@@ -1032,7 +1032,7 @@ fn solve(n: *Native) void {
 }
 
 ~pub tor nl.each { cl: *Native<solved> }
-! cmd koru/clay:CmdView
+! cmd libs/clay:CmdView
 | drained
 
 ~proc nl.each|zig {

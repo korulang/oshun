@@ -24,7 +24,7 @@
 
 ~std/build:requires {
     exe.linkLibC();
-    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
 }
 
 // Backend compilation requirements: ui's tors embed this module's code —
@@ -34,9 +34,9 @@
 // include path must land on that module, not just exe (-I reaches root only).
 ~std/compiler:requires {
     exe.linkLibC();
-    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
     if (exe.root_module.import_table.get("backend_output")) |mod| {
-        mod.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/koru-libs/clay" });
+        mod.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/clay" });
     }
 }
 
@@ -76,7 +76,7 @@ fn axis(a: []const u8) i64 {
 // ============================================================================
 
 ~pub tor panel {
-    t: *koru/clay:Tree<tree>,
+    t: *libs/clay:Tree<tree>,
     dock: string, ws: string, w: f64, hs: string, h: f64,
     dir: string, gap: i64, pad: i64, ax: string, ay: string,
     r: f64, g: f64, b: f64, a: f64,
@@ -130,7 +130,7 @@ fn axis(a: []const u8) i64 {
 // declared it — immune to Clay dropping command-less rows (col/row) or
 // reordering, which a running command index cannot survive.
 ~pub tor panelx {
-    t: *koru/clay:Tree<tree>,
+    t: *libs/clay:Tree<tree>,
     dock: string, ws: string, w: f64, hs: string, h: f64,
     dir: string, gap: i64, pad: i64, ax: string, ay: string,
     r: f64, g: f64, b: f64, a: f64,
@@ -187,7 +187,7 @@ fn axis(a: []const u8) i64 {
 // come from the enclosing element's layout: the text's own box is the
 // measured size.
 ~pub tor text {
-    t: *koru/clay:Tree<tree>,
+    t: *libs/clay:Tree<tree>,
     tx: string, fs: f64,
     r: f64, g: f64, b: f64, a: f64,
     eid: i64,
@@ -210,7 +210,7 @@ fn axis(a: []const u8) i64 {
 // handle (i64 pointer bits — Clay hands it back in the IMAGE command).
 // `eid` stamps decl.userData the same way panelx does.
 ~pub tor imgpanel {
-    t: *koru/clay:Tree<tree>,
+    t: *libs/clay:Tree<tree>,
     dock: string, ws: string, w: f64, hs: string, h: f64,
     data: i64,
     fl: i64, fx: f64, fy: f64,

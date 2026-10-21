@@ -1,11 +1,14 @@
 {
   "name": "oshun",
   "version": "0.0.1",
-  "description": "Oshun — the markup language OMNI consumes (XAML/WPF-flavored, lowered to spec-row seeds)",
-  "koru": { "entry": "index.kz" },
+  "description": "Oshun \u2014 the markup language OMNI consumes (XAML/WPF-flavored, lowered to spec-row seeds)",
+  "koru": {
+    "entry": "index.kz"
+  },
   "paths": {
     "std": "../koru/koru_std",
     "koru": "../koru-libs",
-    "libs": "../koru-libs"
+    "libs": "../koru-libs",
+    "oshun": "."
   }
 }
