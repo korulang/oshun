@@ -49,7 +49,8 @@ std/store:new(specs, capacity: 2048) {
     ar: f64,
     br: f64, bg: f64, bb: f64, ba: f64,
     bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     ox: f64, oy: f64, hv: i64,
     fid: i64, ls: i64, lh: i64, wm: i64, tal: i64,
     txc: i64, fs: f64,
@@ -104,7 +105,13 @@ for(0..1200)
             bwt: if (@mod(@divTrunc(rng.s5, 1048576), 4) == 3) @mod(@divTrunc(rng.s3, 32768), 7) else 0,
             bwb: if (@mod(@divTrunc(rng.s4, 33554432), 5) == 4) @mod(@divTrunc(rng.s5, 8192), 7) else 0,
             bwc: if (@mod(@divTrunc(rng.s2, 134217728), 5) == 4) 1 + @mod(@divTrunc(rng.s5, 2048), 5) else 0,
-            fl: if (@mod(@divTrunc(rng.s4, 1536), 5) == 0) 1 else 0,
+            fat: if (@mod(@divTrunc(rng.s4, 1536), 5) == 0) (if (@mod(@divTrunc(rng.s5, 1073741824), 2) == 0) 1 else 3) else 0,
+            fae: @mod(@divTrunc(rng.s5, 1048576), 9),
+            fap: @mod(@divTrunc(rng.s4, 24576), 9),
+            exw: if (@mod(@divTrunc(rng.s4, 33554432), 3) == 2) @as(f64, @floatFromInt(@mod(@divTrunc(rng.s5, 512), 12))) else 0.0,
+            exh: if (@mod(@divTrunc(rng.s5, 134217728), 3) == 2) @as(f64, @floatFromInt(@mod(@divTrunc(rng.s4, 262144), 12))) else 0.0,
+            zi: if (@mod(@divTrunc(rng.s5, 33554432), 3) == 2) @mod(@divTrunc(rng.s4, 16), 9) - 4 else 0,
+            fct: @mod(@divTrunc(rng.s5, 1073741824), 2),
             fx: @as(f64, @floatFromInt(@mod(@divTrunc(rng.s4, 7680), 400))) - 60.0,
             fy: @as(f64, @floatFromInt(@mod(@divTrunc(rng.s4, 614400), 320))) - 40.0,
             ox: @as(f64, @floatFromInt(@mod(@divTrunc(rng.s4, 4915200), 160))) - 80.0,
@@ -126,7 +133,7 @@ libs/clay:init(width: 900, height: 640)
     |> libs/clay:layout(cl: h)
         ! tree t
             |> libs/clay:el.open(t)
-            |> libs/clay:el.cfg(t, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fl: 0, fx: 0.0, fy: 0.0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
+            |> libs/clay:el.cfg(t, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fat: 0, fx: 0.0, fy: 0.0, fae: 0, fap: 0, exw: 0.0, exh: 0.0, zi: 0, fct: 0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
             |> std/store:query(specs)
                 ! query s
                     |> libs/clay:el.close-to(t, s.d)
@@ -136,16 +143,16 @@ libs/clay:init(width: 900, height: 640)
                                 wk: if (s.dk == 1 or s.dk == 3) 1 else if (s.dk == 2) 3 else s.wk, s.w,
                                 hk: if (s.dk == 1) 3 else if (s.dk == 2 or s.dk == 3) 1 else s.hk, s.h,
                                 s.dir, s.gap, s.padl, s.padr, s.padt, s.padb, s.ax, s.ay,
-                                s.r, s.g, s.b, s.a, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                s.r, s.g, s.b, s.a, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                     |> if (s.kind == 1)
                         | then |> libs/clay:el.clip(t, s.wk, s.w, s.hk, s.h,
                             s.dir, s.gap, s.padl, s.padr, s.padt, s.padb,
                             s.r, s.g, s.b, s.a,
-                            ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
+                            ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
                     |> if (s.kind == 2)
                         | then |> libs/clay:el.open(t)
                             |> libs/clay:el.img(t, s.wk, s.w, s.hk, s.h,
-                                data: s.eid + 5000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                data: s.eid + 5000, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                             |> libs/clay:el.close(t)
                     |> if (s.kind == 3)
                         | then |> libs/clay:el.text(t,
@@ -154,10 +161,10 @@ libs/clay:init(width: 900, height: 640)
                     |> if (s.kind == 4)
                         | then |> libs/clay:el.open(t)
                             |> libs/clay:el.custom(t, s.wk, s.w, s.hk, s.h,
-                                data: s.eid + 9000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                data: s.eid + 9000, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                             |> libs/clay:el.close(t)
         | solved cls |> libs/clay:each(cl: cls)
-            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} tx={{ rc.tx:s }}")
+            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} z={{ rc.zi:d }} tx={{ rc.tx:s }}")
             | drained |> _
     |> std/io:print.ln("==CAND==")
     |> libs/nativelayout:nl.init(width: 900, height: 640)
@@ -165,7 +172,7 @@ libs/clay:init(width: 900, height: 640)
         |> libs/nativelayout:nl.layout(cl: nh)
             ! ntree nt
                 |> libs/nativelayout:nl.el.open(t: nt)
-                |> libs/nativelayout:nl.el.cfg(t: nt, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fl: 0, fx: 0.0, fy: 0.0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
+                |> libs/nativelayout:nl.el.cfg(t: nt, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fat: 0, fx: 0.0, fy: 0.0, fae: 0, fap: 0, exw: 0.0, exh: 0.0, zi: 0, fct: 0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
                 |> std/store:query(specs)
                     ! query s
                         |> libs/nativelayout:nl.el.close-to(t: nt, s.d)
@@ -175,16 +182,16 @@ libs/clay:init(width: 900, height: 640)
                                     wk: if (s.dk == 1 or s.dk == 3) 1 else if (s.dk == 2) 3 else s.wk, s.w,
                                     hk: if (s.dk == 1) 3 else if (s.dk == 2 or s.dk == 3) 1 else s.hk, s.h,
                                     s.dir, s.gap, s.padl, s.padr, s.padt, s.padb, s.ax, s.ay,
-                                    s.r, s.g, s.b, s.a, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                    s.r, s.g, s.b, s.a, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                         |> if (s.kind == 1)
                             | then |> libs/nativelayout:nl.el.clip(t: nt, s.wk, s.w, s.hk, s.h,
                                 s.dir, s.gap, s.padl, s.padr, s.padt, s.padb,
                                 s.r, s.g, s.b, s.a,
-                                ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
+                                ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
                         |> if (s.kind == 2)
                             | then |> libs/nativelayout:nl.el.open(t: nt)
                                 |> libs/nativelayout:nl.el.img(t: nt, s.wk, s.w, s.hk, s.h,
-                                    data: s.eid + 5000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                    data: s.eid + 5000, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                                 |> libs/nativelayout:nl.el.close(t: nt)
                         |> if (s.kind == 3)
                             | then |> libs/nativelayout:nl.el.text(t: nt,
@@ -193,10 +200,10 @@ libs/clay:init(width: 900, height: 640)
                         |> if (s.kind == 4)
                             | then |> libs/nativelayout:nl.el.open(t: nt)
                                 |> libs/nativelayout:nl.el.custom(t: nt, s.wk, s.w, s.hk, s.h,
-                                    data: s.eid + 9000, s.fl, s.fx, s.fy, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
+                                    data: s.eid + 9000, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.eid, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, s.ar, s.br, s.bg, s.bb, s.ba, s.bwl, s.bwr, s.bwt, s.bwb, s.bwc)
                                 |> libs/nativelayout:nl.el.close(t: nt)
             | nsolved cls |> libs/nativelayout:nl.each(cl: cls)
-                ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} tx={{ rc.tx:s }}")
+                ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} z={{ rc.zi:d }} tx={{ rc.tx:s }}")
                 | drained |> libs/nativelayout:nl.drop(cl: nh)
     | err ne |> std/io:print.ln("nl init failed: {{ ne:s }}")
     |> std/store:stored { world.mut: 1 }
@@ -204,7 +211,7 @@ libs/clay:init(width: 900, height: 640)
     |> libs/clay:layout(cl: h)
         ! tree t
             |> libs/clay:el.open(t)
-            |> libs/clay:el.cfg(t, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fl: 0, fx: 0.0, fy: 0.0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
+            |> libs/clay:el.cfg(t, wk: 1, w: 0.0, hk: 1, h: 0.0, dir: 1, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, fat: 0, fx: 0.0, fy: 0.0, fae: 0, fap: 0, exw: 0.0, exh: 0.0, zi: 0, fct: 0, eid: 7000001, ovr: 0.0, ovg: 0.0, ovb: 0.0, ova: 0.0, crtl: 0.0, crtr: 0.0, crbl: 0.0, crbr: 0.0, ar: 0.0, br: 0.0, bg: 0.0, bb: 0.0, ba: 0.0, bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
             |> std/store:query(specs)
                 ! query s
                     |> libs/clay:el.close-to(t, s.d)
@@ -214,16 +221,16 @@ libs/clay:init(width: 900, height: 640)
                                 wk: if (s.dk == 1 or s.dk == 3) 1 else if (s.dk == 2) 3 else s.wk, w: if (s.wk == 2) s.w else s.w + @as(f64, @floatFromInt(world.mut)),
                                 hk: if (s.dk == 1) 3 else if (s.dk == 2 or s.dk == 3) 1 else s.hk, s.h,
                                 s.dir, gap: s.gap + world.mut, padl: s.padl + world.mut, s.padr, s.padt, s.padb, s.ax, s.ay,
-                                s.r, s.g, s.b, s.a, s.fl, s.fx, s.fy, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
+                                s.r, s.g, s.b, s.a, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
                     |> if (s.kind == 1)
                         | then |> libs/clay:el.clip(t, s.wk, s.w, s.hk, s.h,
                             s.dir, gap: s.gap + world.mut, padl: s.padl + world.mut, s.padr, s.padt, s.padb,
                             s.r, s.g, s.b, s.a,
-                            ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
+                            ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, s.crtr, crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, s.ox, s.oy, horiz: @mod(s.hv, 2), vert: @divTrunc(s.hv, 2))
                     |> if (s.kind == 2)
                         | then |> libs/clay:el.open(t)
                             |> libs/clay:el.img(t, s.wk, w: if (s.wk == 2) s.w else s.w + @as(f64, @floatFromInt(world.mut)), s.hk, s.h,
-                                data: s.eid + 5000, s.fl, s.fx, s.fy, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
+                                data: s.eid + 5000, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, s.zi, s.fct, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
                             |> libs/clay:el.close(t)
                     |> if (s.kind == 3)
                         | then |> libs/clay:el.text(t,
@@ -232,10 +239,10 @@ libs/clay:init(width: 900, height: 640)
                     |> if (s.kind == 4)
                         | then |> libs/clay:el.open(t)
                             |> libs/clay:el.custom(t, s.wk, w: if (s.wk == 2) s.w else s.w + @as(f64, @floatFromInt(world.mut)), s.hk, s.h,
-                                data: s.eid + 9000 + world.mut * 7, s.fl, s.fx, s.fy, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
+                                data: s.eid + 9000 + world.mut * 7, s.fat, s.fx, s.fy, s.fae, s.fap, s.exw, s.exh, zi: s.zi + world.mut * 8, s.fct, eid: s.eid + world.mut * 100000, ovr: s.r, ovg: s.g, ovb: s.b, s.ova, s.crtl, crtr: s.crtr + @as(f64, @floatFromInt(world.mut)), crbl: s.cbl, crbr: s.cbr, ar: s.ar + @as(f64, @floatFromInt(world.mut)), s.br, s.bg, s.bb, s.ba, bwl: s.bwl + world.mut, s.bwr, s.bwt, s.bwb, s.bwc)
                             |> libs/clay:el.close(t)
         | solved cls |> libs/clay:each(cl: cls)
-            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} tx={{ rc.tx:s }}")
+            ! cmd rc |> std/io:print.ln("cmd k={{ rc.kind:d }} ud={{ rc.ud:d }} r={{ rc.x:d:.3 }},{{ rc.y:d:.3 }},{{ rc.w:d:.3 }},{{ rc.h:d:.3 }} c={{ rc.r:d:.4 }},{{ rc.g:d:.4 }},{{ rc.b:d:.4 }},{{ rc.a:d:.4 }} i={{ rc.img:d }} d={{ rc.cd:d }} f={{ rc.fs:d:.1 }} cr={{ rc.ctl:d:.2 }},{{ rc.ctr:d:.2 }},{{ rc.cbl:d:.2 }},{{ rc.cbr:d:.2 }} bw={{ rc.bwl:d:.0 }},{{ rc.bwr:d:.0 }},{{ rc.bwt:d:.0 }},{{ rc.bwb:d:.0 }},{{ rc.bwc:d:.0 }} fi={{ rc.fi:d }} ls={{ rc.ls:d:.0 }} lh={{ rc.lh:d:.0 }} z={{ rc.zi:d }} tx={{ rc.tx:s }}")
             | drained |> _
     |> libs/clay:drop(cl: h)
 | err e |> std/io:print.ln("clay init failed: {{ e:s }}")

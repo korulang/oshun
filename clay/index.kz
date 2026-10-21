@@ -154,7 +154,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     dir: i64, gap: i64, padl: i64, padr: i64, padt: i64, padb: i64,
     ax: i64, ay: i64,
     r: f64, g: f64, b: f64, a: f64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -189,13 +190,14 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
         .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
     };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
-    if (fl != 0) {
-        decl.floating = .{
-            .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
-            .attachTo = $mod.c.CLAY_ATTACH_TO_ROOT,
-            .attachPoints = .{ .element = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP, .parent = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP },
-        };
-    }
+    decl.floating = .{
+        .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
+        .expand = .{ .width = @floatCast(exw), .height = @floatCast(exh) },
+        .zIndex = @intCast(@min(@max(zi, -32768), 32767)),
+        .attachPoints = .{ .element = @intCast(@min(@max(fae, 0), 8)), .parent = @intCast(@min(@max(fap, 0), 8)) },
+        .attachTo = @intCast(@min(@max(fat, 0), 3)),
+        .clipTo = @intCast(@min(@max(fct, 0), 1)),
+    };
     $mod.c.Clay__ConfigureOpenElement(decl);
 }
 
@@ -207,7 +209,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     t: *Tree<tree>,
     wk: i64, w: f64, hk: i64, h: f64,
     data: i64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -233,13 +236,14 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
         .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
     };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
-    if (fl != 0) {
-        decl.floating = .{
-            .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
-            .attachTo = $mod.c.CLAY_ATTACH_TO_ROOT,
-            .attachPoints = .{ .element = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP, .parent = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP },
-        };
-    }
+    decl.floating = .{
+        .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
+        .expand = .{ .width = @floatCast(exw), .height = @floatCast(exh) },
+        .zIndex = @intCast(@min(@max(zi, -32768), 32767)),
+        .attachPoints = .{ .element = @intCast(@min(@max(fae, 0), 8)), .parent = @intCast(@min(@max(fap, 0), 8)) },
+        .attachTo = @intCast(@min(@max(fat, 0), 3)),
+        .clipTo = @intCast(@min(@max(fct, 0), 1)),
+    };
     $mod.c.Clay__ConfigureOpenElement(decl);
 }
 
@@ -251,7 +255,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     t: *Tree<tree>,
     wk: i64, w: f64, hk: i64, h: f64,
     data: i64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -277,13 +282,14 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
         .width = .{ .left = @intCast(@max(bwl, 0)), .right = @intCast(@max(bwr, 0)), .top = @intCast(@max(bwt, 0)), .bottom = @intCast(@max(bwb, 0)), .betweenChildren = @intCast(@max(bwc, 0)) },
     };
     decl.userData = @ptrFromInt(@as(usize, @intCast(@as(u64, @bitCast(eid)))));
-    if (fl != 0) {
-        decl.floating = .{
-            .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
-            .attachTo = $mod.c.CLAY_ATTACH_TO_ROOT,
-            .attachPoints = .{ .element = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP, .parent = $mod.c.CLAY_ATTACH_POINT_LEFT_TOP },
-        };
-    }
+    decl.floating = .{
+        .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
+        .expand = .{ .width = @floatCast(exw), .height = @floatCast(exh) },
+        .zIndex = @intCast(@min(@max(zi, -32768), 32767)),
+        .attachPoints = .{ .element = @intCast(@min(@max(fae, 0), 8)), .parent = @intCast(@min(@max(fap, 0), 8)) },
+        .attachTo = @intCast(@min(@max(fat, 0), 3)),
+        .clipTo = @intCast(@min(@max(fct, 0), 1)),
+    };
     $mod.c.Clay__ConfigureOpenElement(decl);
 }
 
@@ -328,6 +334,8 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
     ar: f64,
     br: f64, bg: f64, bb: f64, ba: f64,
     bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -359,6 +367,14 @@ fn clayErr(ed: c.Clay_ErrorData) callconv(.c) void {
         .horizontal = horiz != 0,
         .vertical = vert != 0,
         .childOffset = .{ .x = @floatCast(ox), .y = @floatCast(oy) },
+    };
+    decl.floating = .{
+        .offset = .{ .x = @floatCast(fx), .y = @floatCast(fy) },
+        .expand = .{ .width = @floatCast(exw), .height = @floatCast(exh) },
+        .zIndex = @intCast(@min(@max(zi, -32768), 32767)),
+        .attachPoints = .{ .element = @intCast(@min(@max(fae, 0), 8)), .parent = @intCast(@min(@max(fap, 0), 8)) },
+        .attachTo = @intCast(@min(@max(fat, 0), 3)),
+        .clipTo = @intCast(@min(@max(fct, 0), 1)),
     };
     $mod.c.Clay__ConfigureOpenElement(decl);
 }
@@ -431,6 +447,7 @@ pub const CmdView = struct {
     fi: i64,
     ls: f64,
     lh: f64,
+    zi: i64,
 };
 
 // Rendered-content dims — what a string occupies at a point size under the
@@ -505,6 +522,7 @@ pub const Dims = struct {
             .fi = if (is_text) @as(i64, @intCast(__rc.renderData.text.fontId)) else 0,
             .ls = if (is_text) @as(f64, @floatFromInt(__rc.renderData.text.letterSpacing)) else 0.0,
             .lh = if (is_text) @as(f64, @floatFromInt(__rc.renderData.text.lineHeight)) else 0.0,
+            .zi = @as(i64, @intCast(__rc.zIndex)),
         });
     }
     return .{ .drained = .{} };

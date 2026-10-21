@@ -167,7 +167,7 @@ libs/clay:init(width: 640, height: 400)
             // tx rows bake measured size like the spec family does
             |> std/store:query(spec)
                 ! query { [row]s } when s.tx != ""
-                    |> libs/clay:measure.text(s.tx, s.fs, 0.0): dims
+                    |> libs/clay:measure.text(s.tx, s.fs, ls: 0.0): dims
                     |> std/store:stored { s.w: dims.w, s.mw: dims.w, s.mh: dims.h }
             |> libs/clay:layout(cl: h)
                 ! tree t

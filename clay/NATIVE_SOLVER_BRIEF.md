@@ -59,10 +59,41 @@ clay.h:2984 centers the natural glyph box inside the line; alignment
 offsets each line's x by 0/half/full of the leftover width; wrapMode
 gates text resizability only — this vendored clay still wraps on
 spaces+newlines regardless, nl mirrors; CmdView +3 fields, comparator
-checks fi/ls/lh on kind 3).
+checks fi/ls/lh on kind 3),
+FLOATING cluster (fat/fx/fy/fae/fap/exw/exh/zi/fct on every el.* +
+nl.el.* — attachTo PARENT/ROOT (the corpus does not draw
+ELEMENT_WITH_ID), attachPoints 9x9 element x parent, expand,
+clipTo ATTACHED_PARENT/NONE, zIndex).
+
+growth 2026-10-21 — floating/attach/expand/zIndex: eighth cycle, the
+first that was a STRUCTURE port, not a field port. Clay registers a
+layoutElementTreeRoots entry on EVERY ConfigureOpenElement call whose
+attachTo != NONE — corpus clip rows reconfigure the open element, so
+one element can register N times and Clay emits its subtree N times.
+nl initially stored element indices in roots and read live fields at
+emit; the gate caught it as one subtree emitted 3x vs 1x because each
+Clay entry FREEZES {parentId, clipElementId, zIndex} at registration
+while nl's emit read final values. roots is now a list of per-
+registration Root{el, par, clip, zi} records; a new clipStk mirrors
+openClipElementStack exactly — pushed per floating configure (resolved
+ancestor) AND per clip configure (own index), popped ONCE at close iff
+the FINAL config has clip|floating, so reconfigures leak entries the
+way upstream does. Attach resolves against the stored parent's EMITTED
+box (a parent not yet emitted — negative zIndex ordering — yields a
+zero box, Clay's hashmap-stale-read quirk mirrored). zi sort is
+bubble-stable on the ENTRY's zi; commands carry entry zi except
+BORDER, betweenChildren rects, and both SCISSOR_ENDs, whose Clay
+literals omit zIndex -> 0. Emit reads live attachPoints/offset/expand
+but stored par/clip/zi — the exact split Clay makes. Corpus: fat
+~20% (1 or 3), 9x9 attach draws, expand 0-11px each axis, zi -4..4,
+fct 0/1. Receipt: GATE PASS — CAND==REF over 2106 cmds (625 under
+nonzero-z roots, 66 clip-wrapped floating subtrees, negative-z roots
+emitting before the implicit root); MUT rejected with 3318
+divergences; smoke, gallery, gallery_comp (8GB), bench_solvers,
+folder_snap, spec_snap green. Dead-draw audit rerun: first zi draw
+was divTrunc(s4,2^32)==0 always -> every zi drew -3 silently.
 ABSENT,
-additive ports — attachPoints 9×9,
-attachTo PARENT/clipTo, expand, zIndex, pct>1 diagnostic line. ABSENT,
+additive ports — pct>1 diagnostic line. ABSENT,
 structural — element IDs + hover machinery (ud-stamp is our hit-test model
 instead), ATTACH_TO_ELEMENT_WITH_ID (wants spec-row refs, not hashes),
 internal scroll state (frame-pure by design — childOffset is app-owned),

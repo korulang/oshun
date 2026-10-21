@@ -70,7 +70,17 @@ pub const Native = struct {
     kids: std.ArrayListUnmanaged(i32) = .{},
     kidsbuf: std.ArrayListUnmanaged(i32) = .{},
     stack: std.ArrayListUnmanaged(i32) = .{},
-    roots: std.ArrayListUnmanaged(i32) = .{},
+    // Floating registrations — one entry per configure call that sees
+    // attachTo != NONE (clay.h:2154 LayoutElementTreeRootArray_Add), so a
+    // reconfigured element emits once per registration. par/clip freeze the
+    // resolution done at configure time (element indices; -1 = none); zi is
+    // the declaration's zIndex at that call.
+    roots: std.ArrayListUnmanaged(Root) = .{},
+    // clay.h's openClipElementStack: pushed at every clip configure (own
+    // index) and every floating configure (resolved clip ancestor, possibly
+    // -1), popped ONCE per closed element whose final config has clip or
+    // floating — reconfigures leak entries, mirroring upstream.
+    clipStk: std.ArrayListUnmanaged(i32) = .{},
     bfs: std.ArrayListUnmanaged(i32) = .{},
     rbuf: std.ArrayListUnmanaged(i32) = .{},
     texts: std.ArrayListUnmanaged(i32) = .{},
@@ -121,9 +131,17 @@ const El = struct {
     ctr: f32 = 0,
     cbl: f32 = 0,
     cbr: f32 = 0,
-    fl: u8 = 0,
+    fat: i64 = 0,
     fx: f32 = 0,
     fy: f32 = 0,
+    fae: i64 = 0,
+    fap: i64 = 0,
+    exw: f32 = 0,
+    exh: f32 = 0,
+    zi: i64 = 0,
+    fct: i64 = 0,
+    fpar: i32 = -1,
+    clipAnc: i32 = -1,
     ch: bool = false,
     cv: bool = false,
     ox: f32 = 0,
@@ -163,6 +181,12 @@ const El = struct {
     par: i32 = -1,
     bx: f32 = 0,
     by: f32 = 0,
+    // emitted bounding box (clay.h:3100 — post-expand, written at DFS visit;
+    // floating attach resolution reads this, zero before the parent emits)
+    ebx: f32 = 0,
+    eby: f32 = 0,
+    ebw: f32 = 0,
+    ebh: f32 = 0,
     // text: word range in n.words, wrapped-line range in n.lines
     w0: i32 = 0,
     nw: i32 = 0,
@@ -204,6 +228,7 @@ const Cmd = struct {
     fi: u16 = 0,
     ls: f32 = 0,
     lh: f32 = 0,
+    zi: i64 = 0,
 };
 
 const alloc = std.heap.page_allocator;
@@ -252,6 +277,11 @@ fn updAspect(e: *El) void {
             e.dh = e.dw * (1.0 / e.ar);
         }
     }
+}
+
+fn els_clip_anc(n: *Native) void {
+    const i = n.els.items.len - 1;
+    n.els.items[i].clipAnc = if (n.clipStk.items.len > 0) n.clipStk.items[n.clipStk.items.len - 1] else -1;
 }
 
 fn closeEl(n: *Native) void {
@@ -306,12 +336,22 @@ fn closeEl(n: *Native) void {
 
     n.stack.items.len -= 1;
     if (n.stack.items.len > 1) {
-        if (e.fl == 0) {
-            const p = &n.els.items[@intCast(n.stack.items[n.stack.items.len - 1])];
+        const pidx = n.stack.items[n.stack.items.len - 1];
+        const p = &n.els.items[@intCast(pidx)];
+        if (e.fat == 0) {
             p.nc += 1;
-            e.par = @intCast(n.stack.items[n.stack.items.len - 1]);
+            e.par = @intCast(pidx);
             n.kidsbuf.append(alloc, idx) catch @panic("nl: OOM");
+        } else {
+            // floating roots resolve PARENT attach against the hierarchical
+            // parent (clay.h:2130 — parentId = hierarchicalParent->id).
+            e.fpar = @intCast(pidx);
         }
+    }
+    // clay.h:1876 — one clip-stack pop per close, only if the element's
+    // FINAL config has clip or floating.
+    if (e.ch or e.cv or e.fat != 0) {
+        if (n.clipStk.items.len > 0) n.clipStk.items.len -= 1;
     }
 }
 
@@ -399,17 +439,26 @@ fn clipsAxis(e: *El, xAxis: bool) bool {
 
 fn sizeAxis(n: *Native, xAxis: bool) void {
     n.bfs.clearRetainingCapacity();
-    for (n.roots.items) |ri| {
+    for (n.roots.items) |re| {
+        const ri = re.el;
         n.bfs.items.len = 0;
         const root = &n.els.items[@intCast(ri)];
-        if (root.fl != 0) {
-            const pd = &n.els.items[0];
+        if (root.fat != 0) {
+            // attachTo PARENT → hierarchical parent's solved dims;
+            // ROOT → the implicit root container {W,H} (clay.h:2290).
+            var pw: f32 = n.w;
+            var ph: f32 = n.h;
+            if (root.fat == 1 and root.fpar >= 0) {
+                const pe = &n.els.items[@intCast(root.fpar)];
+                pw = pe.dw;
+                ph = pe.dh;
+            }
             if (xAxis) {
-                if (root.wk == GROW) root.dw = pd.dw;
-                if (root.wk == PCT) root.dw = pd.dw * root.wmn;
+                if (root.wk == GROW) root.dw = pw;
+                if (root.wk == PCT) root.dw = pw * root.wmn;
             } else {
-                if (root.hk == GROW) root.dh = pd.dh;
-                if (root.hk == PCT) root.dh = pd.dh * root.hmn;
+                if (root.hk == GROW) root.dh = ph;
+                if (root.hk == PCT) root.dh = ph * root.hmn;
             }
         }
         if (xAxis) {
@@ -638,7 +687,8 @@ fn propagateHeights(n: *Native) void {
     var seen = std.ArrayListUnmanaged(bool){};
     defer stack.deinit(alloc);
     defer seen.deinit(alloc);
-    for (n.roots.items) |ri| {
+    for (n.roots.items) |re| {
+        const ri = re.el;
         stack.clearRetainingCapacity();
         seen.clearRetainingCapacity();
         stack.append(alloc, ri) catch @panic("nl: OOM");
@@ -682,34 +732,91 @@ fn propagateHeights(n: *Native) void {
 }
 
 const Node = struct { el: i32, x: f32, y: f32, nox: f32, noy: f32, seen: bool };
+const Root = struct { el: i32, par: i32, clip: i32, zi: i32 };
 
-// Position + command emission — the final DFS per root.
+// Position + command emission — the final DFS per root. Roots walk in
+// stable zIndex order — clay.h:2712's bubble sort (strict-< swap ⇒ stable,
+// declaration order preserved among equal keys).
 fn emitCommands(n: *Native) void {
     var dfs = std.ArrayListUnmanaged(Node){};
     defer dfs.deinit(alloc);
-    for (n.roots.items) |ri| {
+    var order = std.ArrayListUnmanaged(Root){};
+    defer order.deinit(alloc);
+    order.appendSlice(alloc, n.roots.items) catch @panic("nl: OOM");
+    var sortMax: usize = order.items.len;
+    while (sortMax > 1) {
+        sortMax -= 1;
+        var i: usize = 0;
+        while (i < sortMax) : (i += 1) {
+            if (order.items[i + 1].zi < order.items[i].zi) {
+                const tmp = order.items[i];
+                order.items[i] = order.items[i + 1];
+                order.items[i + 1] = tmp;
+            }
+        }
+    }
+    // clay.h: the implicit root container's emitted bbox is {0,0,W,H} — it is
+    // written when the main DFS starts, so floating roots that sort before it
+    // (negative zIndex) resolve ROOT attach against a zero box.
+    for (order.items) |rent| {
+        const ri = rent.el;
         dfs.clearRetainingCapacity();
         const root = &n.els.items[@intCast(ri)];
         var px: f32 = 0;
         var py: f32 = 0;
-        if (root.fl != 0) {
-            px = root.fx;
-            py = root.fy;
+        if (root.fat != 0) {
+            // Attach resolution (clay.h:2739): the parent's attach point lands
+            // on the element's attach point, plus offset — against the stored
+            // parent's EMITTED bbox (post-expand; a zero box if the parent
+            // hasn't emitted yet, mirroring GetHashMapItem on a stale id).
+            var pbx: f32 = 0;
+            var pby: f32 = 0;
+            var pw: f32 = 0;
+            var ph: f32 = 0;
+            if (rent.par >= 0) {
+                const pe = &n.els.items[@intCast(rent.par)];
+                pbx = pe.ebx;
+                pby = pe.eby;
+                pw = pe.ebw;
+                ph = pe.ebh;
+            }
+            const pcol = @divTrunc(root.fap, 3);
+            const prow = @mod(root.fap, 3);
+            var ax = pbx;
+            if (pcol == 1) ax += pw / 2 else if (pcol == 2) ax += pw;
+            var ay = pby;
+            if (prow == 1) ay += ph / 2 else if (prow == 2) ay += ph;
+            const ecol = @divTrunc(root.fae, 3);
+            const erow = @mod(root.fae, 3);
+            if (ecol == 1) ax -= root.dw / 2 else if (ecol == 2) ax -= root.dw;
+            if (erow == 1) ay -= root.dh / 2 else if (erow == 2) ay -= root.dh;
+            px = ax + root.fx;
+            py = ay + root.fy;
+        }
+        // The entry's stored clip wraps this subtree's DFS in a SCISSOR pair
+        // using the clip element's emitted bbox (clay.h:2793, :3198) — a clip
+        // that hasn't emitted yields a zero box, which is NOT offscreen.
+        if (rent.clip >= 0) {
+            const ce = &n.els.items[@intCast(rent.clip)];
+            if (!offscreen(n, ce.ebx, ce.eby, ce.ebw, ce.ebh)) {
+                n.cmds.append(alloc, .{ .kind = 5, .x = ce.ebx, .y = ce.eby, .w = ce.ebw, .h = ce.ebh, .zi = rent.zi }) catch @panic("nl: OOM");
+            }
         }
         const rpadx: f32 = @floatFromInt(root.padl);
         const rpady: f32 = @floatFromInt(root.padt);
         dfs.append(alloc, .{ .el = ri, .x = px, .y = py, .nox = rpadx, .noy = rpady, .seen = false }) catch @panic("nl: OOM");
+        const zi = rent.zi;
         while (dfs.items.len > 0) {
             var node = &dfs.items[dfs.items.len - 1];
             if (node.seen) {
                 const e = &n.els.items[@intCast(node.el)];
                 dfs.items.len -= 1;
                 if (e.is_text) continue;
-                if (!offscreen(n, e.bx, e.by, e.dw, e.dh)) {
+                if (!offscreen(n, e.ebx, e.eby, e.ebw, e.ebh)) {
                     // BORDER + betweenChildren rects emit on pop, before
                     // OVERLAY_END/SCISSOR_END — matching clay.h's DFS-return order.
                     if (e.bwl > 0 or e.bwr > 0 or e.bwt > 0 or e.bwb > 0 or e.bwc > 0) {
-                        n.cmds.append(alloc, .{ .kind = 2, .x = e.bx, .y = e.by, .w = e.dw, .h = e.dh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr, .bwl = @floatFromInt(e.bwl), .bwr = @floatFromInt(e.bwr), .bwt = @floatFromInt(e.bwt), .bwb = @floatFromInt(e.bwb), .bwc = @floatFromInt(e.bwc) }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 2, .x = e.ebx, .y = e.eby, .w = e.ebw, .h = e.ebh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr, .bwl = @floatFromInt(e.bwl), .bwr = @floatFromInt(e.bwr), .bwt = @floatFromInt(e.bwt), .bwb = @floatFromInt(e.bwb), .bwc = @floatFromInt(e.bwc) }) catch @panic("nl: OOM");
                         if (e.bwc > 0 and e.ba > 0) {
                             const gap: f32 = @floatFromInt(e.gap);
                             // childGap and betweenChildren are u16 in clay.h —
@@ -729,7 +836,7 @@ fn emitCommands(n: *Native) void {
                                 for (kids, 0..) |ki, i| {
                                     const ce = &n.els.items[@intCast(ki)];
                                     if (i > 0) {
-                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.bx + offx + sx - halfW, .y = e.by + sy, .w = @floatFromInt(e.bwc), .h = e.dh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
+                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.ebx + offx + sx - halfW, .y = e.eby + sy, .w = @floatFromInt(e.bwc), .h = e.dh, .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
                                     }
                                     offx += ce.dw + gap;
                                 }
@@ -737,7 +844,7 @@ fn emitCommands(n: *Native) void {
                                 for (kids, 0..) |ki, i| {
                                     const ce = &n.els.items[@intCast(ki)];
                                     if (i > 0) {
-                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.bx + sx, .y = e.by + offy + sy - halfW, .w = e.dw, .h = @floatFromInt(e.bwc), .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
+                                        n.cmds.append(alloc, .{ .kind = 1, .x = e.ebx + sx, .y = e.eby + offy + sy - halfW, .w = e.dw, .h = @floatFromInt(e.bwc), .r = e.br, .g = e.bg, .b = e.bb, .a = e.ba, .ud = e.ud }) catch @panic("nl: OOM");
                                     }
                                     offy += ce.dh + gap;
                                 }
@@ -745,7 +852,7 @@ fn emitCommands(n: *Native) void {
                         }
                     }
                     if (e.ova > 0) {
-                        n.cmds.append(alloc, .{ .kind = 8, .ud = e.ud }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 8, .ud = e.ud, .zi = zi }) catch @panic("nl: OOM");
                     }
                     if (e.ch or e.cv) {
                         n.cmds.append(alloc, .{ .kind = 6 }) catch @panic("nl: OOM");
@@ -765,7 +872,24 @@ fn emitCommands(n: *Native) void {
             }
             e.bx = bx;
             e.by = by;
-            const offs = offscreen(n, bx, by, e.dw, e.dh);
+            // expand inflates the emitted bbox only (clay.h:2948); the solved
+            // dims dw/dh stay untouched, but children position and the stored
+            // attach-resolution box both read the expanded box.
+            var ebx = bx;
+            var eby = by;
+            var ebw = e.dw;
+            var ebh = e.dh;
+            if (e.fat != 0) {
+                ebx -= e.exw;
+                ebw += e.exw * 2;
+                eby -= e.exh;
+                ebh += e.exh * 2;
+            }
+            e.ebx = ebx;
+            e.eby = eby;
+            e.ebw = ebw;
+            e.ebh = ebh;
+            const offs = offscreen(n, ebx, eby, ebw, ebh);
             if (!offs) {
                 if (e.is_text) {
                     // clay.h:2981 — the natural glyph box centers inside the
@@ -781,12 +905,12 @@ fn emitCommands(n: *Native) void {
                         }
                         // textAlignment: line offset inside the element box
                         // (clay.h:2991 — LEFT 0, CENTER half, RIGHT full).
-                        var toff: f32 = e.dw - line.w;
+                        var toff: f32 = ebw - line.w;
                         if (e.tal == 0) toff = 0 else if (e.tal == 1) toff /= 2;
                         n.cmds.append(alloc, .{
                             .kind = 3,
-                            .x = bx + toff,
-                            .y = by + ypos,
+                            .x = ebx + toff,
+                            .y = eby + ypos,
                             .w = line.w,
                             .h = line.h,
                             .r = e.tcr,
@@ -794,6 +918,7 @@ fn emitCommands(n: *Native) void {
                             .b = e.tcb,
                             .a = e.tca,
                             .ud = e.ud,
+                            .zi = zi,
                             .tx = e.tx[@intCast(line.s)..@intCast(line.s + line.len)],
                             .fs = e.fs,
                             .fi = e.fid,
@@ -801,23 +926,23 @@ fn emitCommands(n: *Native) void {
                             .lh = @floatFromInt(e.lh),
                         }) catch @panic("nl: OOM");
                         ypos += line.h;
-                        if (by + ypos > n.h) break;
+                        if (eby + ypos > n.h) break;
                     }
                 } else {
                     if (e.ova > 0) {
-                        n.cmds.append(alloc, .{ .kind = 7, .r = e.ovr, .g = e.ovg, .b = e.ovb, .a = e.ova, .ud = e.ud }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 7, .r = e.ovr, .g = e.ovg, .b = e.ovb, .a = e.ova, .ud = e.ud, .zi = zi }) catch @panic("nl: OOM");
                     }
                     if (e.img != 0) {
-                        n.cmds.append(alloc, .{ .kind = 4, .x = bx, .y = by, .w = e.dw, .h = e.dh, .img = e.img, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 4, .x = ebx, .y = eby, .w = ebw, .h = ebh, .img = e.img, .ud = e.ud, .zi = zi, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
                     }
                     if (e.cd != 0) {
-                        n.cmds.append(alloc, .{ .kind = 9, .x = bx, .y = by, .w = e.dw, .h = e.dh, .r = e.r, .g = e.g, .b = e.b, .a = e.a, .cd = e.cd, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 9, .x = ebx, .y = eby, .w = ebw, .h = ebh, .r = e.r, .g = e.g, .b = e.b, .a = e.a, .cd = e.cd, .ud = e.ud, .zi = zi, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
                     }
                     if (e.ch or e.cv) {
-                        n.cmds.append(alloc, .{ .kind = 5, .x = bx, .y = by, .w = e.dw, .h = e.dh }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 5, .x = ebx, .y = eby, .w = ebw, .h = ebh, .zi = zi }) catch @panic("nl: OOM");
                     }
                     if (e.a > 0) {
-                        n.cmds.append(alloc, .{ .kind = 1, .x = bx, .y = by, .w = e.dw, .h = e.dh, .r = e.r, .g = e.g, .b = e.b, .a = e.a, .ud = e.ud, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
+                        n.cmds.append(alloc, .{ .kind = 1, .x = ebx, .y = eby, .w = ebw, .h = ebh, .r = e.r, .g = e.g, .b = e.b, .a = e.a, .ud = e.ud, .zi = zi, .ctl = e.ctl, .ctr = e.ctr, .cbl = e.cbl, .cbr = e.cbr }) catch @panic("nl: OOM");
                     }
                 }
             }
@@ -840,6 +965,8 @@ fn emitCommands(n: *Native) void {
                 node.noy += @max(0, extra);
             }
             // Children appended in declaration order, first child on top.
+            // They position from the EXPANDED box (clay.h:3171 uses the
+            // stored boundingBox) but alignment whitespace uses solved dims.
             dfs.ensureUnusedCapacity(alloc, kids.len) catch @panic("nl: OOM");
             const nlen = dfs.items.len + kids.len;
             dfs.items.len = nlen;
@@ -857,14 +984,20 @@ fn emitCommands(n: *Native) void {
                     const ws = e.dw - @as(f32, @floatFromInt(@as(i64, e.padl) + @as(i64, e.padr))) - ce.dw;
                     if (e.ax == 2) node.nox += ws / 2 else if (e.ax == 1) node.nox += ws;
                 }
-                const cx = bx + node.nox + sx;
-                const cy = by + node.noy + sy;
+                const cx = ebx + node.nox + sx;
+                const cy = eby + node.noy + sy;
                 dfs.items[nlen - 1 - i] = .{ .el = ci, .x = cx, .y = cy, .nox = cpadx, .noy = cpady, .seen = false };
                 if (e.dir == LTR) {
                     node.nox += ce.dw + @as(f32, @floatFromInt(e.gap));
                 } else {
                     node.noy += ce.dh + @as(f32, @floatFromInt(e.gap));
                 }
+            }
+        }
+        if (rent.clip >= 0) {
+            const ce = &n.els.items[@intCast(rent.clip)];
+            if (!offscreen(n, ce.ebx, ce.eby, ce.ebw, ce.ebh)) {
+                n.cmds.append(alloc, .{ .kind = 6 }) catch @panic("nl: OOM");
             }
         }
     }
@@ -925,6 +1058,7 @@ fn solve(n: *Native) void {
     cl.kidsbuf.deinit($mod.std.heap.page_allocator);
     cl.stack.deinit($mod.std.heap.page_allocator);
     cl.roots.deinit($mod.std.heap.page_allocator);
+    cl.clipStk.deinit($mod.std.heap.page_allocator);
     cl.bfs.deinit($mod.std.heap.page_allocator);
     cl.rbuf.deinit($mod.std.heap.page_allocator);
     cl.texts.deinit($mod.std.heap.page_allocator);
@@ -944,6 +1078,7 @@ fn solve(n: *Native) void {
     cl.kidsbuf.clearRetainingCapacity();
     cl.stack.clearRetainingCapacity();
     cl.roots.clearRetainingCapacity();
+    cl.clipStk.clearRetainingCapacity();
     // The implicit root — FIXED to layout dims, LTR, on the stack twice
     // (mirroring BeginLayout's double push) so top-level elements attach.
     cl.els.append($mod.alloc, .{
@@ -952,7 +1087,7 @@ fn solve(n: *Native) void {
     }) catch @panic("nl: OOM");
     cl.stack.append($mod.alloc, 0) catch @panic("nl: OOM");
     cl.stack.append($mod.alloc, 0) catch @panic("nl: OOM");
-    cl.roots.append($mod.alloc, 0) catch @panic("nl: OOM");
+    cl.roots.append($mod.alloc, .{ .el = 0, .par = -1, .clip = -1, .zi = 0 }) catch @panic("nl: OOM");
     var __t = $mod.NTree{ .n = cl, .depth = 0 };
     ntree(&__t);
     while (__t.depth > 0) : (__t.depth -= 1) $mod.closeEl(cl);
@@ -968,6 +1103,7 @@ fn solve(n: *Native) void {
 ~proc nl.el.open|zig {
     const idx: i32 = @intCast(t.n.els.items.len);
     t.n.els.append($mod.alloc, .{}) catch @panic("nl: OOM");
+    $mod.els_clip_anc(t.n);
     t.n.stack.append($mod.alloc, idx) catch @panic("nl: OOM");
     t.depth += 1;
 }
@@ -978,7 +1114,8 @@ fn solve(n: *Native) void {
     dir: i64, gap: i64, padl: i64, padr: i64, padt: i64, padb: i64,
     ax: i64, ay: i64,
     r: f64, g: f64, b: f64, a: f64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -1027,19 +1164,41 @@ fn solve(n: *Native) void {
     e.bwb = @intCast(@min(@max(bwb, 0), 65535));
     e.bwc = @intCast(@min(@max(bwc, 0), 65535));
     e.ud = @intCast(@as(u64, @bitCast(eid)));
-    if (fl != 0) {
-        e.fl = 1;
-        e.fx = @floatCast(fx);
-        e.fy = @floatCast(fy);
-        t.n.roots.append($mod.alloc, @intCast(t.n.stack.items[t.n.stack.items.len - 1])) catch @panic("nl: OOM");
+    e.fat = @min(@max(fat, 0), 3);
+    e.fx = @floatCast(fx);
+    e.fy = @floatCast(fy);
+    e.fae = @min(@max(fae, 0), 8);
+    e.fap = @min(@max(fap, 0), 8);
+    e.exw = @floatCast(exw);
+    e.exh = @floatCast(exh);
+    e.zi = @min(@max(zi, -32768), 32767);
+    e.fct = @min(@max(fct, 0), 1);
+    const __ei: i32 = @intCast(t.n.stack.items[t.n.stack.items.len - 1]);
+    if (e.fat != 0) {
+        // clay.h:2118-2158 — every floating configure resolves the clip
+        // ancestor off the open-clip stack, pushes it back, and registers a
+        // tree root. Reconfigures register again (and leak clip entries).
+        var cid: i32 = -1;
+        if (e.fat == 1 and t.n.clipStk.items.len > 0) cid = t.n.clipStk.items[t.n.clipStk.items.len - 1];
+        if (e.fct == 0) cid = -1;
+        e.clipAnc = cid;
+        t.n.clipStk.append($mod.alloc, cid) catch @panic("nl: OOM");
+        const __par: i32 = switch (e.fat) {
+            1 => t.n.stack.items[t.n.stack.items.len - 2],
+            3 => 0,
+            else => -1,
+        };
+        t.n.roots.append($mod.alloc, .{ .el = __ei, .par = __par, .clip = cid, .zi = @intCast(e.zi) }) catch @panic("nl: OOM");
     }
+    if (e.ch or e.cv) t.n.clipStk.append($mod.alloc, __ei) catch @panic("nl: OOM");
 }
 
 ~pub tor nl.el.img {
     t: *NTree<ntree>,
     wk: i64, w: f64, hk: i64, h: f64,
     data: i64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -1074,12 +1233,33 @@ fn solve(n: *Native) void {
     e.bwt = @intCast(@min(@max(bwt, 0), 65535));
     e.bwb = @intCast(@min(@max(bwb, 0), 65535));
     e.bwc = @intCast(@min(@max(bwc, 0), 65535));
-    if (fl != 0) {
-        e.fl = 1;
-        e.fx = @floatCast(fx);
-        e.fy = @floatCast(fy);
-        t.n.roots.append($mod.alloc, @intCast(t.n.stack.items[t.n.stack.items.len - 1])) catch @panic("nl: OOM");
+    e.fat = @min(@max(fat, 0), 3);
+    e.fx = @floatCast(fx);
+    e.fy = @floatCast(fy);
+    e.fae = @min(@max(fae, 0), 8);
+    e.fap = @min(@max(fap, 0), 8);
+    e.exw = @floatCast(exw);
+    e.exh = @floatCast(exh);
+    e.zi = @min(@max(zi, -32768), 32767);
+    e.fct = @min(@max(fct, 0), 1);
+    const __ei: i32 = @intCast(t.n.stack.items[t.n.stack.items.len - 1]);
+    if (e.fat != 0) {
+        // clay.h:2118-2158 — every floating configure resolves the clip
+        // ancestor off the open-clip stack, pushes it back, and registers a
+        // tree root. Reconfigures register again (and leak clip entries).
+        var cid: i32 = -1;
+        if (e.fat == 1 and t.n.clipStk.items.len > 0) cid = t.n.clipStk.items[t.n.clipStk.items.len - 1];
+        if (e.fct == 0) cid = -1;
+        e.clipAnc = cid;
+        t.n.clipStk.append($mod.alloc, cid) catch @panic("nl: OOM");
+        const __par: i32 = switch (e.fat) {
+            1 => t.n.stack.items[t.n.stack.items.len - 2],
+            3 => 0,
+            else => -1,
+        };
+        t.n.roots.append($mod.alloc, .{ .el = __ei, .par = __par, .clip = cid, .zi = @intCast(e.zi) }) catch @panic("nl: OOM");
     }
+    if (e.ch or e.cv) t.n.clipStk.append($mod.alloc, __ei) catch @panic("nl: OOM");
 }
 
 // A custom leaf — same decl shape as nl.el.img, but `data` lands in the
@@ -1089,7 +1269,8 @@ fn solve(n: *Native) void {
     t: *NTree<ntree>,
     wk: i64, w: f64, hk: i64, h: f64,
     data: i64,
-    fl: i64, fx: f64, fy: f64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     eid: i64,
     ovr: f64, ovg: f64, ovb: f64, ova: f64,
     crtl: f64, crtr: f64, crbl: f64, crbr: f64,
@@ -1124,12 +1305,33 @@ fn solve(n: *Native) void {
     e.bwt = @intCast(@min(@max(bwt, 0), 65535));
     e.bwb = @intCast(@min(@max(bwb, 0), 65535));
     e.bwc = @intCast(@min(@max(bwc, 0), 65535));
-    if (fl != 0) {
-        e.fl = 1;
-        e.fx = @floatCast(fx);
-        e.fy = @floatCast(fy);
-        t.n.roots.append($mod.alloc, @intCast(t.n.stack.items[t.n.stack.items.len - 1])) catch @panic("nl: OOM");
+    e.fat = @min(@max(fat, 0), 3);
+    e.fx = @floatCast(fx);
+    e.fy = @floatCast(fy);
+    e.fae = @min(@max(fae, 0), 8);
+    e.fap = @min(@max(fap, 0), 8);
+    e.exw = @floatCast(exw);
+    e.exh = @floatCast(exh);
+    e.zi = @min(@max(zi, -32768), 32767);
+    e.fct = @min(@max(fct, 0), 1);
+    const __ei: i32 = @intCast(t.n.stack.items[t.n.stack.items.len - 1]);
+    if (e.fat != 0) {
+        // clay.h:2118-2158 — every floating configure resolves the clip
+        // ancestor off the open-clip stack, pushes it back, and registers a
+        // tree root. Reconfigures register again (and leak clip entries).
+        var cid: i32 = -1;
+        if (e.fat == 1 and t.n.clipStk.items.len > 0) cid = t.n.clipStk.items[t.n.clipStk.items.len - 1];
+        if (e.fct == 0) cid = -1;
+        e.clipAnc = cid;
+        t.n.clipStk.append($mod.alloc, cid) catch @panic("nl: OOM");
+        const __par: i32 = switch (e.fat) {
+            1 => t.n.stack.items[t.n.stack.items.len - 2],
+            3 => 0,
+            else => -1,
+        };
+        t.n.roots.append($mod.alloc, .{ .el = __ei, .par = __par, .clip = cid, .zi = @intCast(e.zi) }) catch @panic("nl: OOM");
     }
+    if (e.ch or e.cv) t.n.clipStk.append($mod.alloc, __ei) catch @panic("nl: OOM");
 }
 
 ~pub tor nl.el.clip {
@@ -1142,6 +1344,8 @@ fn solve(n: *Native) void {
     ar: f64,
     br: f64, bg: f64, bb: f64, ba: f64,
     bwl: i64, bwr: i64, bwt: i64, bwb: i64, bwc: i64,
+    fat: i64, fx: f64, fy: f64,
+    fae: i64, fap: i64, exw: f64, exh: f64, zi: i64, fct: i64,
     ox: f64, oy: f64, horiz: i64, vert: i64,
 }
 
@@ -1183,6 +1387,33 @@ fn solve(n: *Native) void {
     e.cv = vert != 0;
     e.ox = @floatCast(ox);
     e.oy = @floatCast(oy);
+    e.fat = @min(@max(fat, 0), 3);
+    e.fx = @floatCast(fx);
+    e.fy = @floatCast(fy);
+    e.fae = @min(@max(fae, 0), 8);
+    e.fap = @min(@max(fap, 0), 8);
+    e.exw = @floatCast(exw);
+    e.exh = @floatCast(exh);
+    e.zi = @min(@max(zi, -32768), 32767);
+    e.fct = @min(@max(fct, 0), 1);
+    const __ei: i32 = @intCast(t.n.stack.items[t.n.stack.items.len - 1]);
+    if (e.fat != 0) {
+        // clay.h:2118-2158 — every floating configure resolves the clip
+        // ancestor off the open-clip stack, pushes it back, and registers a
+        // tree root. Reconfigures register again (and leak clip entries).
+        var cid: i32 = -1;
+        if (e.fat == 1 and t.n.clipStk.items.len > 0) cid = t.n.clipStk.items[t.n.clipStk.items.len - 1];
+        if (e.fct == 0) cid = -1;
+        e.clipAnc = cid;
+        t.n.clipStk.append($mod.alloc, cid) catch @panic("nl: OOM");
+        const __par: i32 = switch (e.fat) {
+            1 => t.n.stack.items[t.n.stack.items.len - 2],
+            3 => 0,
+            else => -1,
+        };
+        t.n.roots.append($mod.alloc, .{ .el = __ei, .par = __par, .clip = cid, .zi = @intCast(e.zi) }) catch @panic("nl: OOM");
+    }
+    if (e.ch or e.cv) t.n.clipStk.append($mod.alloc, __ei) catch @panic("nl: OOM");
 }
 
 ~pub tor nl.el.text {
@@ -1197,6 +1428,7 @@ fn solve(n: *Native) void {
     const n = t.n;
     const idx: i32 = @intCast(n.els.items.len);
     n.els.append($mod.alloc, .{}) catch @panic("nl: OOM");
+    $mod.els_clip_anc(n);
     const e = &n.els.items[@intCast(idx)];
     e.is_text = true;
     e.tx = tx;
@@ -1277,6 +1509,7 @@ fn solve(n: *Native) void {
             .fi = @as(i64, rc.fi),
             .ls = rc.ls,
             .lh = rc.lh,
+            .zi = rc.zi,
         });
     }
     return .{ .drained = .{} };

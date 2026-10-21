@@ -6,7 +6,8 @@
   ==MUT==   known-wrong candidate (must NOT match REF)
 
 Per-kind field rules (matching what consumers actually read):
-  kind, ud        : exact, always
+  kind, ud, z=    : exact, always (z is the command's zIndex — the
+                    floating root's, so order+payload both checked)
   rect            : all kinds, tol 0.001 (same binary — near-exact expected)
   color c=        : kinds 1 (RECT), 3 (TEXT), 7 (OVERLAY_START —
                     overlayColor.color aliases rectangle.backgroundColor
@@ -38,7 +39,7 @@ pat = re.compile(
     r" c=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
     r" i=(-?\d+) d=(-?\d+) f=([-\d.]+) cr=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
     r" bw=([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)"
-    r" fi=(-?\d+) ls=([-\d.]+) lh=([-\d.]+) tx=(.*)$")
+    r" fi=(-?\d+) ls=([-\d.]+) lh=([-\d.]+) z=(-?\d+) tx=(.*)$")
 
 def parse(path):
     secs, cur = {}, None
@@ -60,7 +61,7 @@ def parse(path):
                                   cr=[float(g[13]), float(g[14]), float(g[15]), float(g[16])],
                                   bw=[float(g[17]), float(g[18]), float(g[19]), float(g[20]), float(g[21])],
                                   fi=int(g[22]), ls=float(g[23]), lh=float(g[24]),
-                                  tx=g[25]))
+                                  zi=int(g[25]), tx=g[26]))
     return secs
 
 def cmp_rows(a, b, label):
@@ -73,6 +74,8 @@ def cmp_rows(a, b, label):
             continue
         if x["ud"] != y["ud"]:
             fails.append(f"{label}[{idx}]: ud {x['ud']} vs {y['ud']}")
+        if x["zi"] != y["zi"]:
+            fails.append(f"{label}[{idx}]: z {x['zi']} vs {y['zi']}")
         for j, (u, v) in enumerate(zip(x["r"], y["r"])):
             if abs(u - v) > 0.001:
                 fails.append(f"{label}[{idx}]: rect[{j}] {u} vs {v} (d={u-v:+.4f})")
