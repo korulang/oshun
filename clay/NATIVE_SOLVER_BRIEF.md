@@ -391,12 +391,48 @@ nl leads both solver laps (~18% solve, ~22% declare) and ~7%
 end-to-end (0.032 vs 0.035 incl. shared expansion). But the finding
 that matters more than the ratio: **the expansion pass (0.021) costs
 more than either pipeline's decl+solve combined** — on a real scene,
-the solver swap moves ~2µs of a ~35µs frame. The dominant per-frame
-cost is the app-side spec walk (queries + measure + fold), which
-neither solver owns. That sharpens §5's bet: the real payoff is a
-solver that walks retained rows directly (expansion + declare fold
-into the solve) or the paused-pump dirty gating — not the solver swap
-alone, which is now proven correct everywhere it was measured.
+the solver swap moves ~2µs of a ~35µs frame.
+
+EXPANSION DECOMPOSITION (2026-10-21 — `bench_scene_dirty.k`,
+`bench_scene_native.kz`; same scene, same protocol, 3 runs each):
+
+| variant | expand | frame |
+|---|---|---|
+| query expansion, uncached measure | 0.021 | 0.045 |
+| dirty-gated (skip expand f>1, retained mw/mh/cw/ch/cc) | 0 | 0.024 |
+| native column walk (`~proc|zig` on `__koru_store_spec`), uncached | 0.021 | 0.045 |
+| native column walk, memoized measure | 0.0003 | 0.028 |
+
+Three findings, each measured:
+
+1. **The query machinery is free.** A host `~proc|zig` walking the spec
+   store's flat column arrays directly — same fold, same sweep, same
+   `koru_clay_measure` bridge — costs the same 0.021 as the `std/store`
+   query version. Queries, iteration, and aggregation total ~0.3µs.
+   A row-walking solver cannot save what isn't spent.
+2. **The 21µs is ONE uncached CoreText call.** Gating the measure out
+   (`tx.len != 0 and false`) drops the lap to 0.00025. The dialect's
+   `measure.text` calls `koru_clay_measure` directly, bypassing BOTH
+   solvers' measure caches (clay's hashmap, nl's mcache) — one "auto
+   hugs text" row costs ~20µs every frame, every run. On text-heavy
+   scenes this scales per text row; it is the worst un-cached surface
+   in the pipeline.
+3. **Memoizing the measure reaches the dirty ceiling without gating.**
+   A module-level `var` AutoHashMap in the proc (persistent state works
+   from a main-module `.kz`) keys (tx,fs)→dims: expand 0.0003, frame
+   0.028 ≈ the 0.024 dirty-gated number. On a static scene, caching the
+   one miss is worth ~60% of the frame; dirty gating then saves only
+   the remaining ~0.3µs walk.
+
+Revised §5 implication: the expansion's cost was never the row walk —
+it was a cache miss the dialect bridge owns. Levers ranked by measured
+payoff on this scene: (a) memoize `measure.text` (~20µs/frame; the
+dialect bridge, not either solver); (b) dirty gating (~21µs/frame on
+static scenes, subsuming (a) but only while rows are untouched);
+(c) solver swap nl↔clay (~2µs, correctness-proven). The row-walking
+native solver's marginal gain over nl is now measured ≈ decl + a
+0.3µs fold — real but small; it consolidates ownership rather than
+unlocking a number.
 
 > **To the session reading this brief**: the numbers below were measured,
 > not quoted — every table entry has a reproduction path. Your job is to
