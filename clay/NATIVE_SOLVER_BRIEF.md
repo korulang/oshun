@@ -295,22 +295,29 @@ Two findings, both real:
    box (zero on frame 1), shifting attach positions and cull sets.
    First fix mirrored the quirk via persistent `pboxes`. Under the
    ruling (fix bugs over parity — no downstream to support) the mirror
-   came back OUT: nl now resolves attach/clip against the target's
-   RENDERED box — where the element's commands actually draw — filled
-   by a silent declaration-order pre-pass over the zi-sorted emission
-   (parents and clip ancestors always precede dependents; a containing
-   root registers before clip/floating roots nested inside its
-   subtree, so the detached rendering pass writes `eb` last — which IS
-   the rendered box for double-visited clip elements). Clay's
-   converged map instead holds whatever the zi-sorted DFS wrote last
-   — for el438 (a clip element inside an offscreen floating subtree)
-   that is the hierarchical (-861,-776) box, never where it renders,
-   so Clay's fixed point culls ud=569. nl emits it at (247,2) —
-   adjudicated nl-correct; the gate encodes this as the
-   ADJUDICATED divergence set (fuzz_cmp.py): CAND must equal REF2
-   PLUS exactly those rows, and REF3 verifies Clay converged
-   (REF2==REF3). Gate: CAND==CAND2 frame-stable, converged-stream
-   modulo adjudicated rows, MUT rejected.
+   came back OUT and nl moved to rendered-box attach resolution —
+   which surfaced the REAL defect. The dialect's raw bracket lets one
+   element be configured repeatedly (clip rows restyle the still-open
+   element); each ConfigureOpenElement replaces `config` wholesale,
+   but Clay's tree-root registration is NOT idempotent — a floating
+   configure appends a root entry that survives a later configure
+   erasing floating. Result: the element is double-visited (in-flow
+   child AND detached root), and the persistent hashmap's zi-order
+   last-writer conflates its hierarchical and detached-frame boxes —
+   attach/clip reads get whichever frame won the sort. el438 was one:
+   hierarchical (-861,-776) inside offscreen floating el431 plus a
+   stale root DFS at (0,0); Clay's converged map held the former and
+   culled ud=569, nl's pre-pass held the latter and emitted (247,2) —
+   BOTH were artifacts of the same bug, and the earlier "adjudicated
+   nl-correct" verdict was wrong. FIXED in vendored clay.h (marked
+   "koru vendored patch": dedupe roots by element index at
+   registration; purge an element's roots at close when its final
+   config is non-floating) and mirrored in nl (addRoot/dropRootsFor).
+   Effect: REF dropped 2106 -> 478 cmds — most of the old stream was
+   stale-root re-emission — and CAND == REF2 STRICTLY, no adjudicated
+   set. REF3 verifies convergence. Gate: CAND==CAND2 frame-stable,
+   strict equality vs REF2, MUT rejected. Upstream-reportable defect
+   in clay 0.14.
 Verdict on the full corpus: nl's solver is ~9% faster and the frame
 LOSES by ~8x end-to-end — the measure cache is the whole story.
 FOLLOW-UP (same day): the cache is now ported — nl carries a
@@ -322,9 +329,9 @@ divergence in Clay's capacity-ERROR path). Post-port numbers, same
 workload, ReleaseFast: clay 0.268/2.32/~0 vs nl 0.199/2.14/~0 — nl
 ahead on EVERY lap and ~10% on the frame; nl decl fell 19.11 ->
 0.199. Post-pboxes numbers (superseded baseline): clay 0.262/2.253/~0
-cmds 2092 vs nl 0.181/2.080/~0 cmds 2092. After the rendered-box
-rewrite the warm streams differ only by the adjudicated ud=569 pair —
-CAND 2094 vs REF2 2092, CAND==CAND2 frame-stable, MUT rejected.
+cmds 2092 vs nl 0.181/2.080/~0 cmds 2092. After the stale-root fix
+the streams match strictly at the smaller real layout — CAND 477 ==
+REF2 477, CAND==CAND2 frame-stable, MUT rejected.
 Attribution verified by isolation: same corpus with text rows skipped
 (kind==3 undrawn) gives clay 0.251/0.503/~0 vs nl 0.178/0.379/~0 —
 nl ahead on every lap and ~25% ahead on the frame. The deficit is the

@@ -1,4 +1,9 @@
 // VERSION: 0.14
+// VENDORED PATCH (koru): differs from upstream 0.14 in two places, both
+// marked "koru vendored patch" — repeated Clay__ConfigureOpenElement calls
+// on one element no longer accumulate stale floating tree-root entries
+// (dedupe at registration in Clay__ConfigureOpenElement, purge on close in
+// Clay__CloseElement).
 
 /*
     NOTE: In order to use this library you must define
@@ -1968,6 +1973,21 @@ void Clay__CloseElement(void) {
             openLayoutElement->floatingChildrenCount++;
             return;
         }
+        // koru vendored patch
+        // The element's final config is not floating, but an earlier
+        // ConfigureOpenElement on this element may have registered a tree
+        // root before the floating config was replaced. Drop stale roots so
+        // the element exists in exactly one emission frame — otherwise it is
+        // visited twice (as a child and as a root) and its hashmap box
+        // becomes traversal-order dependent, corrupting attach/clip reads.
+        for (int32_t rootIndex = context->layoutElementTreeRoots.length - 1; rootIndex >= 0; --rootIndex) {
+            if (Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex)->layoutElementIndex == closingElementIndex) {
+                for (int32_t shiftIndex = rootIndex; shiftIndex < context->layoutElementTreeRoots.length - 1; ++shiftIndex) {
+                    context->layoutElementTreeRoots.internalArray[shiftIndex] = context->layoutElementTreeRoots.internalArray[shiftIndex + 1];
+                }
+                context->layoutElementTreeRoots.length--;
+            }
+        }
         openLayoutElement->children.length++;
         Clay__int32_tArray_Add(&context->layoutElementChildrenBuffer, closingElementIndex);
     }
@@ -2151,12 +2171,33 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
             int32_t currentElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);
             Clay__int32_tArray_Set(&context->layoutElementClipElementIds, currentElementIndex, clipElementId);
             Clay__int32_tArray_Add(&context->openClipElementStack, clipElementId);
-            Clay__LayoutElementTreeRootArray_Add(&context->layoutElementTreeRoots, CLAY__INIT(Clay__LayoutElementTreeRoot) {
-                .layoutElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1),
-                .parentId = floatingConfig->parentId,
-                .clipElementId = clipElementId,
-                .zIndex = floatingConfig->zIndex,
-            });
+            // koru vendored patch
+            // Repeated ConfigureOpenElement calls on one element are legal in
+            // bindings that expose configuration as separate calls: each call
+            // replaces `config` wholesale. Side effects must therefore be
+            // idempotent — update an existing root entry for this element
+            // rather than accumulating one per floating configure.
+            int32_t rootElementIndex = Clay__int32_tArray_GetValue(&context->openLayoutElementStack, context->openLayoutElementStack.length - 1);
+            Clay__LayoutElementTreeRoot *existingRoot = CLAY__NULL;
+            for (int32_t rootIndex = 0; rootIndex < context->layoutElementTreeRoots.length; ++rootIndex) {
+                Clay__LayoutElementTreeRoot *existing = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
+                if (existing->layoutElementIndex == rootElementIndex) {
+                    existingRoot = existing;
+                    break;
+                }
+            }
+            if (existingRoot) {
+                existingRoot->parentId = floatingConfig->parentId;
+                existingRoot->clipElementId = clipElementId;
+                existingRoot->zIndex = floatingConfig->zIndex;
+            } else {
+                Clay__LayoutElementTreeRootArray_Add(&context->layoutElementTreeRoots, CLAY__INIT(Clay__LayoutElementTreeRoot) {
+                    .layoutElementIndex = rootElementIndex,
+                    .parentId = floatingConfig->parentId,
+                    .clipElementId = clipElementId,
+                    .zIndex = floatingConfig->zIndex,
+                });
+            }
         }
     }
 

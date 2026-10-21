@@ -141,47 +141,21 @@ if not mut_fails:
 
 # Warm-frame sections (REF2/CAND2/REF3): same spec re-laid-out on the same
 # context — exercises persistent state. Clay's persistent hashmap carries
-# prior-frame boxes into attach/clip resolution (cold-start artifact) AND
-# resolves them as zi-sorted last-writer, which conflates hierarchical and
-# detached-frame boxes for double-visited clip elements. nl resolves
-# attach/clip against the target's RENDERED box via a declaration-order
-# pre-pass. Ruling: correctness over parity — CAND may differ from Clay's
-# converged stream where the divergence is adjudicated nl-correct, but the
-# diff must be exactly the adjudicated set; anything else fails.
+# prior-frame boxes into attach/clip resolution (cold-start artifact), so
+# Clay's frame-1 REF is informational; REF2 is the converged oracle.
 #
-# ADJUDICATED: the ud=569 rect+border pair. Its attach parent (a clip
-# element) renders its subtree at detached origin (0,0,13,16); Clay's
-# converged map holds the hierarchical (-861,-776.8,13,16) box — a
-# zi-order accident, never where the element renders — so Clay's fixed
-# point culls 569. nl anchors to the rendered box -> emits at (247,2).
-ADJUDICATED = []
-for line in (
-    "cmd k=1 ud=569 r=247.000,2.000,13.000,95.000 c=0.0549,0.5412,0.8706,1.0000 i=0 d=0 f=0.0 cr=3.00,3.00,3.00,7.00 bw=0,0,0,0,0 fi=0 ls=0 lh=0 z=0 tx=",
-    "cmd k=2 ud=569 r=247.000,2.000,13.000,95.000 c=0.7490,0.0392,0.3255,1.0000 i=0 d=0 f=0.0 cr=3.00,3.00,3.00,7.00 bw=4,0,0,0,4 fi=0 ls=0 lh=0 z=0 tx=",
-):
-    m = pat.match(line)
-    g = m.groups()
-    ADJUDICATED.append(dict(k=int(g[0]), ud=int(g[1]),
-                           r=[float(g[2]), float(g[3]), float(g[4]), float(g[5])],
-                           c=[float(g[6]), float(g[7]), float(g[8]), float(g[9])],
-                           i=int(g[10]), d=int(g[11]), f=float(g[12]),
-                           cr=[float(g[13]), float(g[14]), float(g[15]), float(g[16])],
-                           bw=[float(g[17]), float(g[18]), float(g[19]), float(g[20]), float(g[21])],
-                           fi=int(g[22]), ls=float(g[23]), lh=float(g[24]),
-                           zi=int(g[25]), tx=g[26]))
-
-def is_adjudicated(row):
-    return any(not cmp_rows([a], [row], "adj") for a in ADJUDICATED)
+# History: an earlier vendored clay.h left STALE tree roots when a
+# reconfigure removed floating (double-visited elements, zi-order
+# last-writer map conflation) — that produced the ud=569 divergence once
+# adjudicated as nl-correct. Root cause was a shared defect in both
+# solvers; fixed in clay.h (dedupe at registration, purge at close) and
+# nl (addRoot/dropRootsFor). Both now emit strictly equal streams, so the
+# check is strict equality against REF2 — no adjudicated set.
 
 def cmp_converged(conv, stream, err_key, label):
-    """Compare a candidate stream to Clay's converged REF2, allowing only
-    the adjudicated extra rows; returns the failure list."""
-    extra = [x for x in stream if is_adjudicated(x)]
-    filtered = [x for x in stream if not is_adjudicated(x)]
-    fails = cmp_rows(conv, filtered, label) + cmp_errs(errs["REF2"], errs[err_key], label)
-    if len(extra) != len(ADJUDICATED):
-        fails.append(f"{label}: adjudicated rows present {len(extra)} != expected {len(ADJUDICATED)}")
-    return fails
+    """Strict positional+payload compare of a candidate stream against
+    Clay's converged REF2 (plus error stream); returns the failure list."""
+    return cmp_rows(conv, stream, label) + cmp_errs(errs["REF2"], errs[err_key], label)
 
 warm_notes = []
 ref2 = secs.get("REF2")
@@ -200,10 +174,10 @@ if ref2 is not None:
         warm_notes.append("REF is frame-stable")
     conv_fails = cmp_converged(ref2, cand, "CAND", "cand-conv")
     if conv_fails:
-        problems.append(f"CAND diverges from Clay's converged stream REF2 beyond the adjudicated set ({len(conv_fails)} divergences)")
+        problems.append(f"CAND diverges from Clay's converged stream REF2 ({len(conv_fails)} divergences)")
         problems += ["  " + f for f in conv_fails[:8]]
     else:
-        warm_notes.append(f"correctness: CAND == REF2 + {len(ADJUDICATED)} adjudicated rows (ud=569: nl anchors to the rendered box; Clay's converged cull is a zi-order map accident)")
+        warm_notes.append("correctness: CAND == REF2 strictly")
     if cand_fails:
         warm_notes.append(f"CAND vs REF (frame 1): {len(cand_fails)} divergences — expected, Clay's cold-start artifact")
 else:
@@ -220,10 +194,10 @@ if "CAND2" in secs:
     if ref2 is not None:
         w_fails = cmp_converged(ref2, secs["CAND2"], "CAND2", "warm")
         if w_fails:
-            problems.append(f"CAND2 diverges from REF2 beyond the adjudicated set ({len(w_fails)} divergences)")
+            problems.append(f"CAND2 diverges from REF2 ({len(w_fails)} divergences)")
             problems += ["  " + f for f in w_fails[:8]]
         else:
-            warm_notes.append("warm: CAND2 == REF2 + adjudicated rows")
+            warm_notes.append("warm: CAND2 == REF2 strictly")
 
 if problems:
     print(f"GATE FAIL — ref {len(ref)} cmds")
@@ -232,7 +206,7 @@ if problems:
     for n in warm_notes:
         print("  " + n)
     sys.exit(1)
-print(f"GATE PASS — CAND matches Clay's converged stream modulo adjudicated divergences ({len(ref)} ref cmds); MUT rejected with {len(mut_fails)} divergences")
+print(f"GATE PASS — CAND strictly matches Clay's converged stream ({len(ref)} ref cmds); MUT rejected with {len(mut_fails)} divergences")
 for n in warm_notes:
     print("  " + n)
 sys.exit(0)

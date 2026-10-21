@@ -60,18 +60,35 @@ Under "fix bugs over parity — nothing to support yet", the `pboxes`
 staleness mirror came back out and the gate's comparison target became
 Clay's CONVERGED stream (REF2, verified stable by REF3), not frame 1.
 nl resolves attach/clip against the target's RENDERED box — filled by
-a silent declaration-order pre-pass, which materializes the rendered
-position because a containing root is registered (and walked) before
-the clip/floating roots nested inside it, so the detached rendering
-pass writes `eb` last for elements in a detached frame. The deeper
-finding: Clay's converged map is neither "the hierarchical box" nor
-"the emitted box" — it is zi-order last-writer, arbitrarily mixing
-document-space and detached-frame boxes for double-visited clip
-elements. Two divergences adjudicated in opposite directions proved
-it: el438's converged map held hierarchical (clay culls ud=569 whose
-parent renders at detached origin — nl's (247,2) emission is correct),
-while el375's held detached (clay shows the ud=482 subtree onscreen —
-matching the rendered box). The gate encodes this as an explicit
-ADJUDICATED set: CAND must equal REF2 PLUS exactly the ud=569 pair —
-correctness over parity without giving up the oracle's ability to say
-no to anything new.
+a silent declaration-order pre-pass. Clay's converged map was read as
+zi-order last-writer, conflating hierarchical and detached-frame boxes
+for double-visited clip elements, and the ud=569 divergence was
+adjudicated "nl-correct" — nl anchored to where the parent RENDERS.
+
+That adjudication was WRONG — corrected same day by deeper
+instrumentation. The "detached origin frame" nl anchored to was not a
+legitimate render frame at all: el438's (0,0) root DFS existed only
+because BOTH solvers shared a stale-root defect. The dialect's raw
+bracket configures one element repeatedly (clip rows restyle the
+still-open element); every ConfigureOpenElement replaces `config`
+wholesale, but tree-root registration was not idempotent — a floating
+configure appended a root entry that survived a later configure
+erasing floating. el438 closed non-floating (in-flow child of el431)
+yet kept a root entry → double-visited → its map box raced by zi
+order. Clay's converged cull and nl's (247,2) emission were the two
+arbitrary sides of the same bug.
+
+Fixed at the root: vendored clay.h (dedupe root registration per
+element index; purge roots at close when the final config is
+non-floating) and mirrored in nl (addRoot/dropRootsFor). The streams
+then matched STRICTLY — REF dropped 2106 → 478 cmds (most of the old
+stream was stale-root re-emission), CAND == REF2 with no adjudicated
+set, upstream-reportable defect in clay 0.14.
+
+Durable lesson on adjudication: a divergence adjudicated "ours is
+better" must survive the question "is the frame it anchors to
+legitimate?" Both answers looked defensible because the defect lived
+one level down — in what made the element emit twice at all. Correct
+semantics first; only then does a survivor divergence mean anything.
+The gate's oracle is unchanged in shape — converged-stream equality
+plus frame-stability — it just no longer needs an exception set.
