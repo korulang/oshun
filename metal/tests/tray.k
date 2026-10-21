@@ -19,9 +19,8 @@
 import libs/metal
 import std/io
 
-tor main {}
-
-[with(libs/metal)]main = tray.new(title: "◉ koru")
+[with(libs/metal)]
+tray.new(title: "◉ koru")
 | tray t |> tray.item(tray: t, label: "Beep", action: "beep", tag: 1)
          |> tray.sep(tray: t)
          |> tray.item(tray: t, label: "Quit", action: "quit", tag: 9)
@@ -38,5 +37,3 @@ tor main {}
         | done w2 |> window.close(win: w2) |> tray.remove(tray: t) |> std/io:print.ln("tray: closed clean")
     | err e |> tray.remove(tray: t) |> std/io:print.ln("window init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("tray init failed: {{ e2:s }}")
-
-main()
