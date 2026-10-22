@@ -21,6 +21,7 @@
     exe.linkLibC();
     exe.linkFramework("Cocoa");
     exe.linkFramework("CoreFoundation");
+    exe.linkFramework("UserNotifications");
 }
 
 const std = @import("std");
@@ -687,6 +688,120 @@ fn alertDialog(title: []const u8, message: []const u8, btn1: []const u8, btn2: ?
     const n = std.mem.len(@as([*:0]u8, @ptrCast(&pbuf)));
     const s = std.heap.page_allocator.dupe(u8, pbuf[0..n]) catch @panic("host: OOM in dialog.open path");
     return .{ .path = s };
+}
+
+// ============================================================================
+// notify — UNUserNotificationCenter. This verb only exists because the
+// bundle does: +currentNotificationCenter throws bundleProxyForCurrentProcess
+// is nil on unbundled binaries even with the embedded __TEXT,__info_plist —
+// the XPC bundle proxy needs the real .app directory, which `koru bundle`
+// makes. Two pieces: a lazy center that requests authorization
+// on first use (alert|sound|badge = 7, nil completion — the system
+// prompt is the receipt), and a KoruNotifyDelegate whose willPresent
+// IMP answers banner+list+sound so a notification fired while the app
+// is frontmost still shows. Without that delegate macOS suppresses
+// notification UI from the active app entirely.
+// ============================================================================
+
+var notify_center: ?Id = null;
+
+// userNotificationCenter:willPresentNotification:withCompletionHandler:
+// — the completion arg is a block literal; its invoke pointer lives at
+// offset 16 (isa, flags, reserved). We call it with presentation
+// options badge(1)|sound(2)|list(8)|banner(16) = 27.
+fn impWillPresent(recv: Id, _s: SEL, center: Id, notif: Id, completion: ?*anyopaque) callconv(.c) void {
+    _ = recv;
+    _ = _s;
+    _ = center;
+    _ = notif;
+    const Block = extern struct {
+        isa: ?*anyopaque,
+        flags: c_int,
+        reserved: c_int,
+        invoke: ?*const anyopaque,
+    };
+    const blk: *const Block = @ptrCast(@alignCast(completion));
+    if (blk.invoke) |iv| {
+        const f: *const fn (?*anyopaque, u64) callconv(.c) void = @ptrCast(@alignCast(iv));
+        f(completion, 27);
+    }
+}
+
+var notify_delegate_class: ?objc.Class = null;
+
+fn ensureNotifyDelegate() ?Id {
+    if (notify_delegate_class == null) {
+        const sup: objc.Class = @ptrCast(cls("NSObject"));
+        const c = objc.objc_allocateClassPair(sup, "KoruNotifyDelegate", 0) orelse return null;
+        _ = objc.class_addMethod(
+            c,
+            sel("userNotificationCenter:willPresentNotification:withCompletionHandler:"),
+            @ptrCast(&impWillPresent),
+            "v@:@@@?",
+        );
+        objc.objc_registerClassPair(c);
+        notify_delegate_class = c;
+    }
+    return send(Id, send(Id, @as(Id, @ptrCast(notify_delegate_class.?)), sel("alloc")), sel("init"));
+}
+
+fn ensureNotifyCenter() ?Id {
+    if (notify_center) |c| return c;
+    const c = send(Id, cls("UNUserNotificationCenter"), sel("currentNotificationCenter"));
+    if (c == null) return null;
+    // alert(4)|sound(2)|badge(1) — nil completion is legal and fire-and-forget:
+    // the permission prompt itself is the receipt. A request added while the
+    // prompt is still up may be dropped; the second send delivers.
+    send2(void, u64, ?*anyopaque, c, sel("requestAuthorizationWithOptions:completionHandler:"), 7, null);
+    if (ensureNotifyDelegate()) |d| {
+        send1(void, Id, c, sel("setDelegate:"), d);
+    }
+    notify_center = c;
+    return c;
+}
+
+var notify_seq: u64 = 0;
+
+~pub tor notify.send { title: string, body: string }
+| ok
+| err string
+
+~proc notify.send|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    // The center hard-throws on unbundled binaries (bundleProxyForCurrentProcess
+    // is nil) — embedded __TEXT,__info_plist is not enough here. Detect the
+    // bundle by its .app path extension and refuse instead of crashing.
+    const b = send(Id, cls("NSBundle"), sel("mainBundle"));
+    const ext = send(Id, send(Id, b, sel("bundleURL")), sel("pathExtension"));
+    const extc = send([*:0]const u8, ext, sel("UTF8String"));
+    if (!std.mem.eql(u8, std.mem.span(extc), "app")) {
+        return .{ .err = "host: notify needs `koru bundle` — the notification center throws on unbundled binaries" };
+    }
+    const c = ensureNotifyCenter() orelse return .{ .err = "host: no UNUserNotificationCenter" };
+    var tbuf: [256]u8 = undefined;
+    var bbuf: [1024]u8 = undefined;
+    var ibuf: [64]u8 = undefined;
+    const content = send(Id, send(Id, cls("UNMutableNotificationContent"), sel("alloc")), sel("init"));
+    send1(void, Id, content, sel("setTitle:"), @as(Id, @ptrCast(@constCast(cf.CFStringCreateWithCString(null, cstr(title, &tbuf), cf.kCFStringEncodingUTF8)))));
+    send1(void, Id, content, sel("setBody:"), @as(Id, @ptrCast(@constCast(cf.CFStringCreateWithCString(null, cstr(body, &bbuf), cf.kCFStringEncodingUTF8)))));
+    send1(void, Id, content, sel("setSound:"), send(Id, cls("UNNotificationSound"), sel("defaultSound")));
+    notify_seq += 1;
+    const n = std.fmt.bufPrint(&ibuf, "koru-notify-{d}", .{notify_seq}) catch return .{ .err = "host: notify id overflow" };
+    var zbuf: [64]u8 = undefined;
+    @memcpy(zbuf[0..n.len], n);
+    zbuf[n.len] = 0;
+    const req = send3(
+        Id, Id, Id, Id,
+        cls("UNNotificationRequest"),
+        sel("requestWithIdentifier:content:trigger:"),
+        @as(Id, @ptrCast(@constCast(cf.CFStringCreateWithCString(null, @as([*:0]const u8, @ptrCast(&zbuf)), cf.kCFStringEncodingUTF8)))),
+        content,
+        @as(Id, null),
+    );
+    if (req == null) return .{ .err = "host: notification request failed" };
+    send2(void, Id, ?*anyopaque, c, sel("addNotificationRequest:withCompletionHandler:"), req, null);
+    return .{ .ok = .{} };
 }
 
 // ============================================================================

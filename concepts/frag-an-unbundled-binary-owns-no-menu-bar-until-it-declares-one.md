@@ -40,3 +40,26 @@ plist while `NSProcessInfo.processName` and LaunchServices
 `LSDisplayName` still read the executable name. So the declaration buys
 the menu title and bundle queries — not every system name; that last
 row needs real `.app` packaging.
+
+`koru bundle` now makes the real `.app` — and it exposes a second,
+harder gate class: some APIs are not name-gated but *bundle-gated*.
+`UNUserNotificationCenter` doesn't misbehave on an unbundled binary, it
+hard-throws an NSException (`bundleProxyForCurrentProcess is nil`) — the
+XPC bundle proxy needs the `.app` directory itself, embedded section
+notwithstanding. `notify.send` detects the gate by
+`mainBundle.bundleURL.pathExtension == "app"` and refuses with a Koru
+error instead of crashing. Bundled, the same call reaches `usernoted`,
+requests authorization, and delivers (`Delivering … to [.alert
+.lockScreen .notificationCenter]`, confirmed in the daemon log and by a
+live banner under `org.koru.oshun.notify2`).
+
+Two lifecycle rules ride along, learned from the daemon:
+
+- Auth prompts are keyed to the bundle id and settle on dismissal — a
+  prompt ignored is a decision recorded, and re-requesting returns
+  `didGrant: 0` fast without re-showing. Probing with a stale id shows
+  nothing; a fresh id gets the real prompt.
+- The auth request is async XPC: a send-then-exit process invalidates
+  the connection before the prompt machinery engages. `notify.send`
+  needs the app alive — `host.run` or any run-loop residency — for the
+  prompt and the banner to survive.
