@@ -1,7 +1,7 @@
 // Animated silk — the windowed sibling of silk_snap. The draw verbs are
 // identical every frame; only the frame clock moves. Snaps at frame 30
-// and frame 150 must differ pixel-for-pixel — that diff IS the proof the
-// ftime uniform reaches the fragment. Quits itself.
+// and frame 150 differ pixel-for-pixel — that diff IS the proof the
+// ftime uniform reaches the fragment. Runs until esc/close.
 //
 //   koruc run metal/tests/silk_live.k
 //   sips -s format png /tmp/omni_silk_t30.bmp --out /tmp/omni_silk_t30.png
@@ -24,8 +24,6 @@ libs/metal:window.open(width: 640, height: 430, title: "omni silk — animated")
             | then |> libs/metal:window.snap(path: "/tmp/omni_silk_t30.bmp")
         |> if (world.frame == 150)
             | then |> libs/metal:window.snap(path: "/tmp/omni_silk_t150.bmp")
-        |> if (world.frame == 160)
-            | then |> libs/host:quit()
     ! key-down k when k.code == 53 |> libs/host:quit()
     ! close |> libs/host:quit()
     | done w2 |> libs/metal:window.close(win: w2) |> std/io:print.ln("silk live: closed")
