@@ -16,7 +16,7 @@ import libs/host
 import std/build
 import std/io
 
-std/build:app { name: "Oshun Notify 2", id: "org.koru.oshun.notify2", version: "0.1" }
+std/build:app { name: "Oshun Notify 2", id: "org.koru.oshun.notify2", version: "0.1", icon: "koru.icns" }
 
 [with(libs/host)]
 tray.new(title: "◉ nf2")
