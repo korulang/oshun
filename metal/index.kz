@@ -96,6 +96,7 @@ extern fn CFArrayGetCount(arr: CId) callconv(.c) isize;
 extern fn CFArrayGetValueAtIndex(arr: CId, i: isize) callconv(.c) Id;
 extern fn CFDictionaryGetValue(dict: CId, key: ?*const anyopaque) callconv(.c) Id;
 extern fn CFHash(ref: ?*const anyopaque) callconv(.c) usize;
+extern fn CACurrentMediaTime() callconv(.c) f64;
 extern fn CFEqual(a: ?*const anyopaque, b: ?*const anyopaque) callconv(.c) bool;
 extern fn CGContextRelease(ctx: CId) callconv(.c) void;
 extern fn CGContextScaleCTM(ctx: CId, sx: f64, sy: f64) callconv(.c) void;
@@ -251,17 +252,20 @@ const msl_src: [:0]const u8 =
     \\               mix(silk_hash(ip + float2(0.0, 1.0)), silk_hash(ip + float2(1.0, 1.0)), s.x), s.y);
     \\}
     \\// Drape height at a local point. mn is the tile's short side, k the
-    \\// fold wave number, ph the per-tile phase, fu/fv fold axes.
-    \\static float silk_field(float2 lp, float mn, float k, float ph, float2 fu, float2 fv) {
+    \\// fold wave number, ph the per-tile phase, fu/fv fold axes, tm the
+    \\// frame clock — the warp field crawls and the wobble phases breathe
+    \\// so the drape stirs rather than slides, each tile at its own rate.
+    \\static float silk_field(float2 lp, float mn, float k, float ph, float2 fu, float2 fv, float tm) {
+    \\    float tm2 = tm * (0.7 + 0.6 * fract(ph * 0.618));
     \\    float u = dot(lp, fu), v = dot(lp, fv);
-    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73) - 0.5;
-    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0) - 0.5;
+    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73 + float2(tm2 * 0.06, -tm2 * 0.045)) - 0.5;
+    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0 + tm2 * 0.05) - 0.5;
     \\    v += (wq * 2.2 + wr * 0.9) / max(k, 0.05);
     \\    u += wr * 1.2 / max(k, 0.05);
-    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0);
-    \\    float w1 = u * k * 0.19 + ph * 1.7;
-    \\    float w2 = u * k * 0.07 + ph;
-    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7;
+    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0 + tm2 * 0.03);
+    \\    float w1 = u * k * 0.19 + ph * 1.7 + tm2 * 0.31;
+    \\    float w2 = u * k * 0.07 + ph + tm2 * 0.13;
+    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7 + tm2 * 0.09;
     \\    float t1 = v * k + 1.4 * sin(w1) + ph;
     \\    float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
     \\    return (0.55 * sin(t1) + 0.22 * sin(t2)) * am + 0.60 * sin(w3);
@@ -269,7 +273,8 @@ const msl_src: [:0]const u8 =
     \\fragment float4 inst_fragment(InstOut in [[stage_in]],
     \\                             constant Inst *insts [[buffer(0)]],
     \\                             texture2d<float> atlas [[texture(0)]],
-    \\                             texture2d<float> images [[texture(1)]]) {
+    \\                             texture2d<float> images [[texture(1)]],
+    \\                             constant float &ftime [[buffer(2)]]) {
     \\    Inst i = insts[in.inst];
     \\    if (in.world.x < i.clip.x || in.world.y < i.clip.y || in.world.x > i.clip.z || in.world.y > i.clip.w)
     \\        discard_fragment();
@@ -321,11 +326,11 @@ const msl_src: [:0]const u8 =
     \\        float mn = min(i.rect.z, i.rect.w);
     \\        float ph = fract(sin(dot(i.rect.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
     \\        float k = 6.28318 * i.silk.y / mn;
-    \\        float h = silk_field(in.local, mn, k, ph, fu, fv);
-    \\        float dvn = (silk_field(in.local + fv, mn, k, ph, fu, fv)
-    \\                  - silk_field(in.local - fv, mn, k, ph, fu, fv)) * 0.5;
-    \\        float dun = (silk_field(in.local + fu, mn, k, ph, fu, fv)
-    \\                  - silk_field(in.local - fu, mn, k, ph, fu, fv)) * 0.5;
+    \\        float h = silk_field(in.local, mn, k, ph, fu, fv, ftime);
+    \\        float dvn = (silk_field(in.local + fv, mn, k, ph, fu, fv, ftime)
+    \\                  - silk_field(in.local - fv, mn, k, ph, fu, fv, ftime)) * 0.5;
+    \\        float dun = (silk_field(in.local + fu, mn, k, ph, fu, fv, ftime)
+    \\                  - silk_field(in.local - fu, mn, k, ph, fu, fv, ftime)) * 0.5;
     \\        float2 g = dun * fu + dvn * fv;
     \\        float3 n = normalize(float3(-g * 4.5, 1.0));
     \\        float3 L = normalize(float3(-0.58, -0.60, 0.55));
@@ -439,6 +444,7 @@ fn instFlush(f: *Frame) void {
     const vp: [2]f32 = .{ f.vp_w, f.vp_h };
     send3(void, *const [2]f32, u64, u64, f.encoder, sel("setVertexBytes:length:atIndex:"), &vp, 8, 1);
     send3(void, Id, u64, u64, f.encoder, sel("setFragmentBuffer:offset:atIndex:"), buf, 0, 0);
+    send3(void, *const f32, u64, u64, f.encoder, sel("setFragmentBytes:length:atIndex:"), &f.time, 4, 2);
     send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.text.atlas.texture, 0);
     send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.images.texture, 1);
     send4(void, u64, u64, u64, u64, f.encoder, sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), 4, 0, 4, n);
@@ -1250,7 +1256,7 @@ fn drawLiveFrame(win: *Window, cb: *const fn (*Frame) void) void {
     const enc = send1(Id, Id, buf, sel("renderCommandEncoderWithDescriptor:"), desc);
     send1(void, Id, enc, sel("setRenderPipelineState:"), win.pso);
     win.flushed = 0;
-    var f = Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images };
+    var f = Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast(CACurrentMediaTime()) };
     win.text.beginFrame();
     win.images.beginFrame();
     cb(&f);
@@ -1411,6 +1417,9 @@ pub const Frame = struct {
     clip_depth: u8,
     text: *TextSystem,
     images: *ImageAtlas,
+    // Wall-clock seconds at frame start — the ambient clock materials
+    // animate on. Stamped by whoever owns the frame.
+    time: f32,
 };
 
 // Pipeline: compile the MSL source, wire the descriptors, build the three
@@ -1764,7 +1773,7 @@ fn buildPipelines(device: Id) error{
         $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), win.pso);
 
         win.flushed = 0;
-        var __f = $mod.Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images };
+        var __f = $mod.Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast($mod.CACurrentMediaTime()) };
         win.text.beginFrame();
         win.images.beginFrame();
         frame(&__f);
@@ -1941,7 +1950,7 @@ pub const Surface = struct {
     $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), s.pso);
 
     s.flushed = 0;
-    var __f = $mod.Frame{ .encoder = enc, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images };
+    var __f = $mod.Frame{ .encoder = enc, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .time = @floatCast($mod.CACurrentMediaTime()) };
     s.text.beginFrame();
     s.images.beginFrame();
     frame(&__f);
