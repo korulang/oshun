@@ -237,6 +237,35 @@ const msl_src: [:0]const u8 =
     \\static float3 silk_pal(float t) {
     \\    return 0.5 + 0.5 * cos(6.28318 * (t + float3(0.0, 0.33, 0.67)));
     \\}
+    \\// Hash value noise — the large displacement layer. Two octaves at
+    \\// ~tile scale warp the fold coordinates, and a third masks fold
+    \\// strength per region, so a drape bunches, bends, and goes flat
+    \\// between fold clusters instead of repeating a uniform wave.
+    \\static float silk_hash(float2 p) {
+    \\    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+    \\}
+    \\static float silk_vnoise(float2 p) {
+    \\    float2 ip = floor(p), fp = fract(p);
+    \\    float2 s = fp * fp * (3.0 - 2.0 * fp);
+    \\    return mix(mix(silk_hash(ip), silk_hash(ip + float2(1.0, 0.0)), s.x),
+    \\               mix(silk_hash(ip + float2(0.0, 1.0)), silk_hash(ip + float2(1.0, 1.0)), s.x), s.y);
+    \\}
+    \\// Drape height at a local point. mn is the tile's short side, k the
+    \\// fold wave number, ph the per-tile phase, fu/fv fold axes.
+    \\static float silk_field(float2 lp, float mn, float k, float ph, float2 fu, float2 fv) {
+    \\    float u = dot(lp, fu), v = dot(lp, fv);
+    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73) - 0.5;
+    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0) - 0.5;
+    \\    v += (wq * 2.2 + wr * 0.9) / max(k, 0.05);
+    \\    u += wr * 1.2 / max(k, 0.05);
+    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0);
+    \\    float w1 = u * k * 0.19 + ph * 1.7;
+    \\    float w2 = u * k * 0.07 + ph;
+    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7;
+    \\    float t1 = v * k + 1.4 * sin(w1) + ph;
+    \\    float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
+    \\    return (0.55 * sin(t1) + 0.22 * sin(t2)) * am + 0.60 * sin(w3);
+    \\}
     \\fragment float4 inst_fragment(InstOut in [[stage_in]],
     \\                             constant Inst *insts [[buffer(0)]],
     \\                             texture2d<float> atlas [[texture(0)]],
@@ -280,29 +309,24 @@ const msl_src: [:0]const u8 =
     \\    }
     \\    if (i.kind == 4.0) {
     \\        // Champagne silk — a synthesized drape field tilts a
-    \\        // pseudo-normal across the quad. Folds run along silk.x,
-    \\        // wander slowly along their length, and take their phase
-    \\        // from rect position so no two tiles agree. Shading: wrap
-    \\        // diffuse, a Kajiya-Kay sheen lobe stretched along the fold
-    \\        // tangent, a tight glint, and a thin-film hue fringe (pearl)
-    \\        // where the surface leans away from the view axis.
+    \\        // pseudo-normal across the quad. Folds run along silk.x and
+    \\        // take their phase from rect position so no two tiles agree;
+    \\        // a tile-scale noise warp displaces the fold coordinates so
+    \\        // the drape bunches and bends like fabric instead of waves.
+    \\        // Shading: wrap diffuse, a Kajiya-Kay sheen lobe stretched
+    \\        // along the fold tangent, a tight glint, and a thin-film hue
+    \\        // fringe (pearl) where the surface leans away from the view.
     \\        float2 fu = float2(cos(i.silk.x), sin(i.silk.x));
     \\        float2 fv = float2(-fu.y, fu.x);
-    \\        float u = dot(in.local, fu), v = dot(in.local, fv);
+    \\        float mn = min(i.rect.z, i.rect.w);
     \\        float ph = fract(sin(dot(i.rect.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
-    \\        float k = 6.28318 * i.silk.y / min(i.rect.z, i.rect.w);
-    \\        float w1 = u * k * 0.19 + ph * 1.7;
-    \\        float w2 = u * k * 0.07 + ph;
-    \\        float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7;
-    \\        float t1 = v * k + 1.4 * sin(w1) + ph;
-    \\        float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
-    \\        float h = 0.55 * sin(t1) + 0.22 * sin(t2) + 0.60 * sin(w3);
-    \\        float dv = 0.55 * k * cos(t1) + 0.22 * k * 2.31 * cos(t2)
-    \\               - 0.60 * k * 0.20 * cos(w3);
-    \\        float du = 0.55 * cos(t1) * (1.4 * k * 0.19 * cos(w1))
-    \\               + 0.22 * cos(t2) * (1.6 * k * 0.07 * cos(w2))
-    \\               + 0.60 * k * 0.35 * cos(w3);
-    \\        float2 g = du * fu + dv * fv;
+    \\        float k = 6.28318 * i.silk.y / mn;
+    \\        float h = silk_field(in.local, mn, k, ph, fu, fv);
+    \\        float dvn = (silk_field(in.local + fv, mn, k, ph, fu, fv)
+    \\                  - silk_field(in.local - fv, mn, k, ph, fu, fv)) * 0.5;
+    \\        float dun = (silk_field(in.local + fu, mn, k, ph, fu, fv)
+    \\                  - silk_field(in.local - fu, mn, k, ph, fu, fv)) * 0.5;
+    \\        float2 g = dun * fu + dvn * fv;
     \\        float3 n = normalize(float3(-g * 4.5, 1.0));
     \\        float3 L = normalize(float3(-0.58, -0.60, 0.55));
     \\        float3 Hv = normalize(L + float3(0.0, 0.0, 1.0));
@@ -312,7 +336,7 @@ const msl_src: [:0]const u8 =
     \\        // The sheen is genuinely anisotropic: the fold tangent tilts
     \\        // with the along-fold slope, so T·H varies across the drape
     \\        // and the highlight settles into bands along the folds.
-    \\        float3 T = normalize(float3(fu, du * 4.5));
+    \\        float3 T = normalize(float3(fu, dun * 4.5));
     \\        float th = dot(T, Hv);
     \\        float sheen = i.silk.z * pow(sqrt(max(0.0, 1.0 - th * th)), 9.0)
     \\                    * smoothstep(-0.15, 0.55, ndl);
