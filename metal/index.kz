@@ -258,14 +258,14 @@ const msl_src: [:0]const u8 =
     \\static float silk_field(float2 lp, float mn, float k, float ph, float2 fu, float2 fv, float tm) {
     \\    float tm2 = tm * (0.7 + 0.6 * fract(ph * 0.618));
     \\    float u = dot(lp, fu), v = dot(lp, fv);
-    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73 + float2(tm2 * 0.06, -tm2 * 0.045)) - 0.5;
-    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0 + tm2 * 0.05) - 0.5;
+    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73 + float2(tm2 * 0.18, -tm2 * 0.13)) - 0.5;
+    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0 + tm2 * 0.14) - 0.5;
     \\    v += (wq * 2.2 + wr * 0.9) / max(k, 0.05);
     \\    u += wr * 1.2 / max(k, 0.05);
-    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0 + tm2 * 0.03);
-    \\    float w1 = u * k * 0.19 + ph * 1.7 + tm2 * 0.31;
-    \\    float w2 = u * k * 0.07 + ph + tm2 * 0.13;
-    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7 + tm2 * 0.09;
+    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0 + tm2 * 0.08);
+    \\    float w1 = u * k * 0.19 + ph * 1.7 + tm2 * 1.0;
+    \\    float w2 = u * k * 0.07 + ph + tm2 * 0.42;
+    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7 + tm2 * 0.25;
     \\    float t1 = v * k + 1.4 * sin(w1) + ph;
     \\    float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
     \\    return (0.55 * sin(t1) + 0.22 * sin(t2)) * am + 0.60 * sin(w3);
