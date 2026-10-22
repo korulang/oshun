@@ -346,14 +346,14 @@ const msl_src: [:0]const u8 =
     \\        // and the highlight settles into bands along the folds.
     \\        float3 T = normalize(float3(fu, dun * 4.5));
     \\        float th = dot(T, Hv);
-    \\        float sheen = i.silk.z * pow(sqrt(max(0.0, 1.0 - th * th)), 9.0)
+    \\        float sheen = i.silk.z * pow(sqrt(max(0.0, 1.0 - th * th)), 16.0)
     \\                    * smoothstep(-0.15, 0.55, ndl);
-    \\        float glint = pow(max(dot(n, Hv), 0.0), 42.0) * i.silk.z;
+    \\        float glint = pow(max(dot(n, Hv), 0.0), 110.0) * i.silk.z;
     \\        float gr = 1.0 - n.z;
     \\        float3 spec_col = mix(float3(1.0, 0.96, 0.88), silk_pal(h * 0.35 + gr * 4.0),
     \\                              clamp(i.silk.w * gr * 3.5, 0.0, 0.50));
     \\        float rim = pow(gr, 2.0) * i.silk.w * 0.30;
-    \\        col += spec_col * (sheen * 0.30 + glint * 0.45)
+    \\        col += spec_col * (sheen * 0.26 + glint * 0.42)
     \\             + silk_pal(gr * 4.0 + ph * 0.11) * rim;
     \\        float saa = max(fwidth(d), 0.0001) * 0.5;
     \\        float scov = 1.0 - smoothstep(-saa, saa, d);
@@ -1805,7 +1805,7 @@ fn buildPipelines(device: Id) error{
             $mod.dumpDrawable(drawable, win);
         }
 
-        $mod.std.Thread.sleep(16 * $mod.std.time.ns_per_ms);
+        $mod.std.Thread.sleep(8 * $mod.std.time.ns_per_ms);
     }
     return .{ .done = win };
 }
