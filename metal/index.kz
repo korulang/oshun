@@ -156,8 +156,9 @@ const msl_src: [:0]const u8 =
     \\// Instanced quads — ported from nanoui's shader.metal (MIT,
     \\// github.com/justrach/nanoui). One instance = one rounded rectangle
     \\// with optional border (kind 0), an atlas glyph (kind 1 — R8 coverage
-    \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), or an
-    \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color).
+    \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), an
+    \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color),
+    \\// or a champagne-silk panel (kind 4 — pearlescent drape field).
     \\// Each instance clips to its clip rect; clip corners may be rounded.
     \\struct Inst {
     \\    float4 rect;          // x, y, w, h in points
@@ -169,6 +170,8 @@ const msl_src: [:0]const u8 =
     \\    float border_width;   // blur sigma for kind 2
     \\    float kind;
     \\    float clip_round;     // corners * 4096 + radius, 0 = square clip
+    \\    float4 silk;          // kind 4: fold angle (rad), folds across the
+    \\                          // short side, sheen strength, pearl fringe
     \\};
     \\struct InstOut {
     \\    float4 pos [[position]];
@@ -229,6 +232,11 @@ const msl_src: [:0]const u8 =
     \\    float2 q = abs(p) - half_size + r;
     \\    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
     \\}
+    \\// Cosine palette for the pearl fringe — warm center, pale rose/mint
+    \\// at the ends. Kept subtle: charmeuse is satin, not soap bubble.
+    \\static float3 silk_pal(float t) {
+    \\    return 0.5 + 0.5 * cos(6.28318 * (t + float3(0.0, 0.33, 0.67)));
+    \\}
     \\fragment float4 inst_fragment(InstOut in [[stage_in]],
     \\                             constant Inst *insts [[buffer(0)]],
     \\                             texture2d<float> atlas [[texture(0)]],
@@ -269,6 +277,55 @@ const msl_src: [:0]const u8 =
     \\        // SourceAlpha/1-SourceAlpha, so straighten before tinting.
     \\        c.rgb /= max(c.a, 1e-5);
     \\        return c * i.color * clip_cover;
+    \\    }
+    \\    if (i.kind == 4.0) {
+    \\        // Champagne silk — a synthesized drape field tilts a
+    \\        // pseudo-normal across the quad. Folds run along silk.x,
+    \\        // wander slowly along their length, and take their phase
+    \\        // from rect position so no two tiles agree. Shading: wrap
+    \\        // diffuse, a Kajiya-Kay sheen lobe stretched along the fold
+    \\        // tangent, a tight glint, and a thin-film hue fringe (pearl)
+    \\        // where the surface leans away from the view axis.
+    \\        float2 fu = float2(cos(i.silk.x), sin(i.silk.x));
+    \\        float2 fv = float2(-fu.y, fu.x);
+    \\        float u = dot(in.local, fu), v = dot(in.local, fv);
+    \\        float ph = fract(sin(dot(i.rect.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
+    \\        float k = 6.28318 * i.silk.y / min(i.rect.z, i.rect.w);
+    \\        float w1 = u * k * 0.19 + ph * 1.7;
+    \\        float w2 = u * k * 0.07 + ph;
+    \\        float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7;
+    \\        float t1 = v * k + 1.4 * sin(w1) + ph;
+    \\        float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
+    \\        float h = 0.55 * sin(t1) + 0.22 * sin(t2) + 0.60 * sin(w3);
+    \\        float dv = 0.55 * k * cos(t1) + 0.22 * k * 2.31 * cos(t2)
+    \\               - 0.60 * k * 0.20 * cos(w3);
+    \\        float du = 0.55 * cos(t1) * (1.4 * k * 0.19 * cos(w1))
+    \\               + 0.22 * cos(t2) * (1.6 * k * 0.07 * cos(w2))
+    \\               + 0.60 * k * 0.35 * cos(w3);
+    \\        float2 g = du * fu + dv * fv;
+    \\        float3 n = normalize(float3(-g * 4.5, 1.0));
+    \\        float3 L = normalize(float3(-0.58, -0.60, 0.55));
+    \\        float3 Hv = normalize(L + float3(0.0, 0.0, 1.0));
+    \\        float ndl = dot(n, L);
+    \\        float shade = clamp(0.55 + 0.62 * ndl, 0.28, 1.30);
+    \\        float3 col = i.color.rgb * shade * (1.0 + 0.14 * h);
+    \\        // The sheen is genuinely anisotropic: the fold tangent tilts
+    \\        // with the along-fold slope, so T·H varies across the drape
+    \\        // and the highlight settles into bands along the folds.
+    \\        float3 T = normalize(float3(fu, du * 4.5));
+    \\        float th = dot(T, Hv);
+    \\        float sheen = i.silk.z * pow(sqrt(max(0.0, 1.0 - th * th)), 9.0)
+    \\                    * smoothstep(-0.15, 0.55, ndl);
+    \\        float glint = pow(max(dot(n, Hv), 0.0), 42.0) * i.silk.z;
+    \\        float gr = 1.0 - n.z;
+    \\        float3 spec_col = mix(float3(1.0, 0.96, 0.88), silk_pal(h * 0.35 + gr * 4.0),
+    \\                              clamp(i.silk.w * gr * 3.5, 0.0, 0.50));
+    \\        float rim = pow(gr, 2.0) * i.silk.w * 0.30;
+    \\        col += spec_col * (sheen * 0.30 + glint * 0.45)
+    \\             + silk_pal(gr * 4.0 + ph * 0.11) * rim;
+    \\        float saa = max(fwidth(d), 0.0001) * 0.5;
+    \\        float scov = 1.0 - smoothstep(-saa, saa, d);
+    \\        return float4(col, i.color.a * scov) * clip_cover;
     \\    }
     \\    float aa = max(fwidth(d), 0.0001) * 0.5;
     \\    float coverage = 1.0 - smoothstep(-aa, aa, d);
@@ -317,12 +374,14 @@ const GpuInstance = extern struct {
     border_width: f32,
     kind: f32,
     clip_round: f32,
+    silk: [4]f32,
 };
 
 const inst_quad: f32 = 0;
 const inst_text: f32 = 1;
 const inst_shadow: f32 = 2;
 const inst_image: f32 = 3;
+const inst_silk: f32 = 4;
 
 // A clip rect as the shader reads it: x0,y0,x1,y1. An empty stack means the
 // huge unclipped rect — cheap in the fragment (four compares).
@@ -1935,6 +1994,7 @@ pub const Surface = struct {
         .border_width = 0,
         .kind = inst_quad,
         .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
     });
 }
 
@@ -1953,6 +2013,7 @@ pub const Surface = struct {
         .border_width = 0,
         .kind = inst_quad,
         .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
     });
 }
 
@@ -1972,6 +2033,7 @@ pub const Surface = struct {
         .border_width = @floatCast(bw),
         .kind = inst_quad,
         .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
     });
 }
 
@@ -1991,6 +2053,29 @@ pub const Surface = struct {
         .border_width = @floatCast(blur),
         .kind = inst_shadow,
         .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// Champagne silk — the pearlescent material. r,g,b,a is the base fabric
+// color (champagne ~0.91,0.85,0.72); `angle` aims the folds in radians,
+// `folds` counts waves across the short side (0 = a flat pearl panel),
+// `sheen` scales the satin highlight, `pearl` the thin-film fringe on
+// tilted flanks. Fold phase derives from position — no two tiles agree.
+~pub tor draw.silk { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, r: f64, g: f64, b: f64, a: f64, angle: f64, folds: f64, sheen: f64, pearl: f64 }
+
+~proc draw.silk|zig {
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = .{ 0, 0, 0, 0 },
+        .clip = curClip(f),
+        .radius = @floatCast(radius),
+        .border_width = 0,
+        .kind = inst_silk,
+        .clip_round = 0,
+        .silk = .{ @floatCast(angle), @floatCast(folds), @floatCast(sheen), @floatCast(pearl) },
     });
 }
 
@@ -2055,6 +2140,7 @@ pub const Surface = struct {
             .border_width = 0,
             .kind = inst_text,
             .clip_round = 0,
+            .silk = .{ 0, 0, 0, 0 },
         });
     }
 }
@@ -2194,5 +2280,6 @@ pub const Surface = struct {
         .border_width = 0,
         .kind = inst_image,
         .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
     });
 }
