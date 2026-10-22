@@ -97,6 +97,9 @@ extern fn CFArrayGetValueAtIndex(arr: CId, i: isize) callconv(.c) Id;
 extern fn CFDictionaryGetValue(dict: CId, key: ?*const anyopaque) callconv(.c) Id;
 extern fn CFHash(ref: ?*const anyopaque) callconv(.c) usize;
 extern fn CACurrentMediaTime() callconv(.c) f64;
+extern fn CGDataProviderCreateWithFilename(filename: [*:0]const u8) callconv(.c) Id;
+extern fn CGFontCreateWithDataProvider(provider: Id) callconv(.c) Id;
+extern fn CTFontCreateWithGraphicsFont(graphicsFont: Id, size: f64, matrix: ?*const anyopaque, attributes: Id) callconv(.c) Id;
 extern fn CFEqual(a: ?*const anyopaque, b: ?*const anyopaque) callconv(.c) bool;
 extern fn CGContextRelease(ctx: CId) callconv(.c) void;
 extern fn CGContextScaleCTM(ctx: CId, sx: f64, sy: f64) callconv(.c) void;
@@ -630,7 +633,7 @@ const Font = struct { ref: Id, ascent: f32, descent: f32, leading: f32 };
 const TextSystem = struct {
     atlas: GlyphAtlas,
     scale: f32,
-    fonts: std.AutoHashMapUnmanaged(u32, Font) = .empty, // key: size bits
+    fonts: std.AutoHashMapUnmanaged(u64, Font) = .empty, // key: face<<32 | size bits (face 0 = system)
     run_fonts: std.ArrayList(Id) = .empty,
     layouts: std.AutoHashMapUnmanaged(u64, Layout) = .empty,
     previous: std.AutoHashMapUnmanaged(u64, Layout) = .empty,
@@ -675,18 +678,25 @@ const TextSystem = struct {
         std.mem.swap(std.AutoHashMapUnmanaged(u64, Layout), &ts.layouts, &ts.previous);
     }
 
-    // The system font at `size` — v1 is regular weight only; the cache
-    // key is the size bits so a heavier face later joins the same map.
-    fn font(ts: *TextSystem, size: f32) Font {
-        const key: u32 = @bitCast(size);
+    // The font for `face` at `size` — face 0 is the system font, face N
+    // is a font.load handle (CGFont wrapped in a CTFont at this size).
+    // The cache key mixes both so faces and sizes never collide.
+    fn font(ts: *TextSystem, face: i64, size: f32) Font {
+        const key: u64 = (@as(u64, @intCast(@max(0, face))) << 32) | @as(u64, @as(u32, @bitCast(size)));
         if (ts.fonts.get(key)) |f| return f;
-        const nsfont = send2(Id, f64, f64, cls("NSFont"), sel("systemFontOfSize:weight:"), @as(f64, size), 0.0) orelse @panic("metal: NSFont creation failed");
-        const ref: Id = send(Id, nsfont, sel("retain"));
+        const ref: Id = if (face <= 0)
+            send2(Id, f64, f64, cls("NSFont"), sel("systemFontOfSize:weight:"), @as(f64, size), 0.0) orelse @panic("metal: NSFont creation failed")
+        else blk: {
+            if (face > loaded_fonts.items.len) @panic("metal: text face with an invalid font handle");
+            const ct = CTFontCreateWithGraphicsFont(loaded_fonts.items[@intCast(face - 1)], @floatCast(size), null, null) orelse @panic("metal: CTFont creation failed");
+            break :blk ct;
+        };
+        const ref2: Id = send(Id, ref, sel("retain"));
         const f: Font = .{
-            .ref = ref,
-            .ascent = @floatCast(CTFontGetAscent(ref)),
-            .descent = @floatCast(CTFontGetDescent(ref)),
-            .leading = @floatCast(CTFontGetLeading(ref)),
+            .ref = ref2,
+            .ascent = @floatCast(CTFontGetAscent(ref2)),
+            .descent = @floatCast(CTFontGetDescent(ref2)),
+            .leading = @floatCast(CTFontGetLeading(ref2)),
         };
         ts.fonts.put(std.heap.page_allocator, key, f) catch @panic("metal: OOM caching font");
         return f;
@@ -702,29 +712,30 @@ const TextSystem = struct {
         return @intCast(ts.run_fonts.items.len - 1);
     }
 
-    fn layoutKey(text: []const u8, size: f32) u64 {
+    fn layoutKey(text: []const u8, face: i64, size: f32) u64 {
         var h = std.hash.Wyhash.init(0);
         h.update(text);
+        h.update(std.mem.asBytes(&face));
         h.update(std.mem.asBytes(&size));
         return h.final();
     }
 
-    // `text` shaped on one line — the cache serves two frames.
-    fn layout(ts: *TextSystem, text: []const u8, size: f32) Layout {
+    // `text` shaped on one line in `face` — the cache serves two frames.
+    fn layout(ts: *TextSystem, text: []const u8, face: i64, size: f32) Layout {
         if (text.len == 0) return .{ .width = 0, .glyphs = &.{} };
-        const k = layoutKey(text, size);
+        const k = layoutKey(text, face, size);
         if (ts.layouts.get(k)) |l| return l;
         if (ts.previous.fetchRemove(k)) |kv| {
             ts.layouts.put(std.heap.page_allocator, k, kv.value) catch @panic("metal: OOM promoting text layout");
             return kv.value;
         }
-        const l = ts.shape(text, size);
+        const l = ts.shape(text, face, size);
         ts.layouts.put(std.heap.page_allocator, k, l) catch @panic("metal: OOM caching text layout");
         return l;
     }
 
-    fn shape(ts: *TextSystem, text: []const u8, size: f32) Layout {
-        const f = ts.font(size);
+    fn shape(ts: *TextSystem, text: []const u8, face: i64, size: f32) Layout {
+        const f = ts.font(face, size);
         const str = cf.CFStringCreateWithBytes(null, text.ptr, @intCast(text.len), cf.kCFStringEncodingUTF8, 0) orelse @panic("metal: CFString creation failed");
         defer cf.CFRelease(str);
         const keys = [_]?*const anyopaque{ kCTFontAttributeName, kCTForegroundColorFromContextAttributeName };
@@ -773,6 +784,11 @@ const TextSystem = struct {
 
 const DecodedImage = struct { pixels: []u8, w: u32, h: u32 };
 var decoded_images: std.ArrayList(DecodedImage) = .empty;
+
+// Font faces loaded from files — font.load appends a retained CGFont and
+// hands back the 1-based index; TextSystem.font wraps it in a CTFont at
+// whatever size a draw asks for.
+var loaded_fonts: std.ArrayList(Id) = .empty;
 
 const img_atlas_pad: u32 = 2; // gutter ring — keeps linear filtering off neighbors
 
@@ -2145,14 +2161,14 @@ pub const Surface = struct {
 // in points (the convention every other draw verb uses); the baseline is
 // y + the font's ascent, snapped to a pixel row. Each glyph becomes a
 // kind-1 instance sampling the atlas — the run shapes once per
-// (string, size) and every glyph rasterizes once per quarter-pixel bin.
-~pub tor draw.text { f: *Frame<frame>, x: f64, y: f64, size: f64, r: f64, g: f64, b: f64, a: f64, text: string }
+// (string, face, size) and every glyph rasterizes once per quarter-pixel bin.
+// ============================================================================
 
-~proc draw.text|zig {
+fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, b: f64, a: f64, text: []const u8) void {
     const ts = f.text;
     const sz: f32 = @floatCast(size);
-    const fnt = ts.font(sz);
-    const lay = ts.layout(text, sz);
+    const fnt = ts.font(face, sz);
+    const lay = ts.layout(text, face, sz);
     if (lay.glyphs.len == 0) return;
     const scale = ts.scale;
     const cx: f32 = @floatCast(x);
@@ -2178,6 +2194,21 @@ pub const Surface = struct {
     }
 }
 
+~pub tor draw.text { f: *Frame<frame>, x: f64, y: f64, size: f64, r: f64, g: f64, b: f64, a: f64, text: string }
+
+~proc draw.text|zig {
+    pushTextRun(f, x, y, size, 0, r, g, b, a, text);
+}
+
+// One run in a font.load'd face — `font` is the 1-based handle font.load
+// returned. Everything else is draw.text: same line-box origin, same
+// baseline snap, same per-glyph atlas instances.
+~pub tor draw.textface { f: *Frame<frame>, x: f64, y: f64, size: f64, font: i64, r: f64, g: f64, b: f64, a: f64, text: string }
+
+~proc draw.textface|zig {
+    pushTextRun(f, x, y, size, font, r, g, b, a, text);
+}
+
 // ============================================================================
 // Text hit-testing — caret math over the SHAPED layout, so it can be called
 // from `! mouse-down` arms where no Frame exists. Both take the window for
@@ -2191,10 +2222,10 @@ pub const Surface = struct {
 // The caret index for a click at `x` points into the run — the midpoint
 // rule: a click left of a glyph's advance midpoint puts the caret before
 // that glyph's cluster.
-~pub tor text.index { win: *Window<opened|active>, text: string, size: f64, x: f64 } -> i64
+~pub tor text.index { win: *Window<opened|active>, text: string, size: f64, face: i64, x: f64 } -> i64
 
 ~proc text.index|zig {
-    const lay = win.text.layout(text, @floatCast(size));
+    const lay = win.text.layout(text, face, @floatCast(size));
     const click: f32 = @floatCast(x);
     for (lay.glyphs) |g| {
         if (click < g.x + g.adv * 0.5) return @intCast(g.str_idx);
@@ -2204,10 +2235,10 @@ pub const Surface = struct {
 
 // The pen x at caret `index` — where a caret rect or a second draw.text
 // continuation goes. Past-the-end lands after the last advance.
-~pub tor text.offset { win: *Window<opened|active>, text: string, size: f64, index: i64 } -> f64
+~pub tor text.offset { win: *Window<opened|active>, text: string, size: f64, face: i64, index: i64 } -> f64
 
 ~proc text.offset|zig {
-    const lay = win.text.layout(text, @floatCast(size));
+    const lay = win.text.layout(text, face, @floatCast(size));
     const idx: u32 = @intCast(@max(0, index));
     var pen: f32 = 0;
     for (lay.glyphs) |g| {
@@ -2224,17 +2255,17 @@ pub const Surface = struct {
 // text.descent a consumer can center a line: box_top = y + (h - asc -
 // desc) / 2. Same font path draw.text shapes with, so the metric can't
 // drift from the renderer.
-~pub tor text.ascent { win: *Window<opened|active>, size: f64 } -> f64
+~pub tor text.ascent { win: *Window<opened|active>, size: f64, face: i64 } -> f64
 
 ~proc text.ascent|zig {
-    return @floatCast(win.text.font(@floatCast(size)).ascent);
+    return @floatCast(win.text.font(face, @floatCast(size)).ascent);
 }
 
 // The font's descent at `size` — baseline to line-box bottom.
-~pub tor text.descent { win: *Window<opened|active>, size: f64 } -> f64
+~pub tor text.descent { win: *Window<opened|active>, size: f64, face: i64 } -> f64
 
 ~proc text.descent|zig {
-    return @floatCast(win.text.font(@floatCast(size)).descent);
+    return @floatCast(win.text.font(face, @floatCast(size)).descent);
 }
 
 // ============================================================================
@@ -2315,4 +2346,28 @@ pub const Surface = struct {
         .clip_round = 0,
         .silk = .{ 0, 0, 0, 0 },
     });
+}
+
+// ============================================================================
+// Fonts — a face from a file becomes a handle draw.textface consumes.
+// CGDataProvider + CGFont needs no registration step: the CTFont wraps
+// the CGFont directly per size at draw time.
+// ============================================================================
+
+// Two-arm load, mirroring image.load — `| font` is the 1-based handle,
+// `| err` names which step failed.
+~pub tor font.load { win: *Window<opened|active>, path: string } | font i64 | err string
+
+~proc font.load|zig {
+    _ = win;
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    var pbuf: [1024]u8 = undefined;
+    const dp = CGDataProviderCreateWithFilename(cstr(path, &pbuf)) orelse
+        return .{ .err = "metal: font file not readable" };
+    defer cf.CFRelease(dp);
+    const cg = CGFontCreateWithDataProvider(dp) orelse
+        return .{ .err = "metal: not a font file" };
+    loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("metal: OOM registering font");
+    return .{ .font = @intCast(loaded_fonts.items.len) };
 }

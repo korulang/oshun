@@ -25,10 +25,10 @@ std/string:from-page(text: "edit me here")
                     |> libs/metal:draw.panel(f, x: 60.0, y: 140.0, w: 520.0, h: 60.0, radius: 10.0, r: 0.16, g: 0.18, b: 0.25, a: 1.0, bw: 1.5, br: 0.5, bg: 0.7, bb: 1.0, ba: 1.0)
                     // Line-box centered: baseline = top + (h - asc - desc)/2 + asc;
                     // the caret bar is the line box itself (same top, asc+desc tall).
-                    |> libs/metal:text.ascent(win: w, size: 18.0): asc
-                        |> libs/metal:text.descent(win: w, size: 18.0): desc
+                    |> libs/metal:text.ascent(win: w, size: 18.0, face: 0): asc
+                        |> libs/metal:text.descent(win: w, size: 18.0, face: 0): desc
                             |> libs/metal:draw.text(f, x: 80.0, y: 140.0 + (60.0 - asc - desc) / 2.0, size: 18.0, r: 0.92, g: 0.94, b: 0.98, a: 1.0, text: txt.data)
-                            |> libs/metal:text.offset(win: w, text: txt.data, size: 18.0, index: world.caret) : cx
+                            |> libs/metal:text.offset(win: w, text: txt.data, size: 18.0, face: 0, index: world.caret) : cx
                                 |> libs/metal:draw.rect(f, x: 80.0 + cx, y: 140.0 + (60.0 - asc - desc) / 2.0, w: 1.5, h: asc + desc, r: 0.95, g: 0.85, b: 0.4, a: 1.0)
                     |> if (world.frame == 10)
                         | then |> libs/metal:input.mouse(x: 120.0, y: 170.0)
@@ -76,7 +76,7 @@ std/string:from-page(text: "edit me here")
                     |> std/store:stored { world.caret: if (world.caret < @as(i64, @intCast(n))) world.caret + 1 else @as(i64, @intCast(n)) }
                 ! key-down k when k.code == 53 |> libs/host:quit()
                 ! mouse-down m
-                    |> libs/metal:text.index(win: w, text: txt.data, size: 18.0, x: m.x - 80.0) : idx
+                    |> libs/metal:text.index(win: w, text: txt.data, size: 18.0, face: 0, x: m.x - 80.0) : idx
                     |> std/store:stored { world.caret: idx }
                 ! close |> libs/host:quit()
                 | done w2 |> libs/metal:window.close(win: w2) |> std/string:free(s: txt) |> std/io:print.ln("textfield: closed")

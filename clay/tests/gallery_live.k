@@ -132,8 +132,8 @@ libs/clay:init(width: 640, height: 480)
                                     // must live exactly as long as draw.text needs it: this arm.
                                     |> if (rc.ud >= 1 and rc.ud <= 60)
                                         | then |> std/string:from-int(n: rc.ud - 1)
-                                            | ok ns |> libs/metal:text.ascent(win: w, size: 13.0): rasc
-                                                |> libs/metal:text.descent(win: w, size: 13.0): rdesc
+                                            | ok ns |> libs/metal:text.ascent(win: w, size: 13.0, face: 0): rasc
+                                                |> libs/metal:text.descent(win: w, size: 13.0, face: 0): rdesc
                                                 |> libs/metal:draw.text(f, x: @round(rc.x + 10.0), y: @round(rc.y + (rc.h - rasc - rdesc) / 2.0), size: 13.0, r: 200.0, g: 205.0, b: 220.0, a: 255.0, text: ns.data)
                                                 |> std/string:free(s: ns)
                                             | err e0 |> std/io:print.ln(e0)
