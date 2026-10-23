@@ -253,11 +253,6 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                         |> if (nl0 > 0)
                                             | then |> libs/hist:push(text: txt.data)
                                     |> std/bridge:run(br, source: txt.data)
-                                        | ok o |> std/string:clear(s: status) |> std/string:append(s: status, text: "minted ")
-                                            | ok |> std/string:append(s: status, text: o)
-                                                | ok |> _
-                                                | err _ |> _
-                                            | err _ |> _
                                         | result _ |> std/string:clear(s: status) |> std/string:append(s: status, text: "ok — minted")
                                             | ok |> _
                                             | err _ |> _
