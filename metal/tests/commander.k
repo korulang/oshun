@@ -185,8 +185,11 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                     |> if (r.tex > 0)
                                                         | then |> libs/metal:draw.image(f, r.tex, x: r.rx + 8.0 * r.s, y: r.ry + 8.0 * r.s, w: r.rw - 16.0 * r.s, h: r.rh - 16.0 * r.s)
                                                     // kind dispatch — the bridge's kind field picks the
-                                                    // renderer: 1 image → its decoded texture above,
-                                                    // 2 audio → the waveform the bytes decoded into.
+                                                    // renderer: 0 doc → its own leading lines, 1 image →
+                                                    // its decoded texture above, 2 audio → the waveform
+                                                    // the bytes decoded into.
+                                                    |> if (r.alive == 1 and r.kind == 0)
+                                                        | then |> libs/components:docpage(f, r.slot, x: r.rx + 10.0 * r.s, y: r.ry + 10.0 * r.s, w: r.rw - 20.0 * r.s, h: r.rh - 20.0 * r.s, a: (1.0 - 0.5 * r.t) * 0.9)
                                                     |> if (r.alive == 1 and r.kind == 2)
                                                         | then |> libs/components:waveform(f, r.slot, x: r.rx + 10.0 * r.s, y: r.ry + 10.0 * r.s, w: r.rw - 20.0 * r.s, h: r.rh - 20.0 * r.s, a: (1.0 - 0.5 * r.t) * 0.9)
                                                     |> app/omni_img:res-id(r.slot) : hid

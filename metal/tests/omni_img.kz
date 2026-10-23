@@ -19,6 +19,13 @@
 // decodable WAV mints kind 2 anyway (it IS audio) but carries zero
 // buckets; res-wave-n says so honestly and the renderer draws a bare
 // rail rather than invent samples.
+//
+// Document decode: minting a doc kind walks the resource's bytes into
+// DOC_LINES preview lines per slot — the surface shapes and draws THOSE,
+// never a stock icon or a "first page" stand-in. A resource whose bytes
+// aren't readable text (a NUL byte means binary) mints kind 0 anyway
+// (it IS a document) but carries zero lines; res-doc-n says so honestly
+// and the renderer draws an empty card rather than invent content.
 
 ~import std/runtime
 
@@ -42,6 +49,23 @@ pub const WavePeak = struct {
     i: i64,
     lo: f64,
     hi: f64,
+};
+
+const DOC_LINES = 14;
+const DOC_LINE_CAP = 96;
+const DOC_CAP: usize = 64 * 1024;
+
+var doc_buf: [DOC_CAP]u8 = undefined;
+var doc_lines: [MAX_RESES][DOC_LINES][DOC_LINE_CAP]u8 = undefined;
+var doc_line_len: [MAX_RESES][DOC_LINES]usize = .{.{0} ** DOC_LINES} ** MAX_RESES;
+var doc_n: [MAX_RESES]i64 = .{0} ** MAX_RESES;
+
+// One preview line of a document — the index plus the line's own text,
+// sanitized to printable UTF-8. A res-doc-each firing hands the surface
+// one per draw call, same idiom as WavePeak.
+pub const DocLine = struct {
+    i: i64,
+    text: []const u8,
 };
 
 var files: [MAX_RESES]?std.fs.File = .{null} ** MAX_RESES;
@@ -147,6 +171,60 @@ fn decodeWave(slot: usize) void {
     $mod.wave_n[slot] = @intCast(nb);
 }
 
+// Walk the resource's bytes at mint into preview lines: '\n'-delimited,
+// '\r' stripped, a UTF-8 BOM skipped, control bytes dropped, invalid or
+// truncated UTF-8 spans skipped whole, each line capped at DOC_LINE_CAP
+// on a codepoint boundary. A NUL byte anywhere in the read marks the
+// resource as binary — doc_n stays 0, the honest "not text" state, and
+// the renderer draws nothing where lines would sit.
+fn decodeDoc(slot: usize) void {
+    $mod.doc_n[slot] = 0;
+    const f = $mod.files[slot] orelse return;
+    f.seekTo(0) catch return;
+    const end = f.getEndPos() catch return;
+    if (end == 0) return;
+    const got = f.readAll($mod.doc_buf[0..@intCast(@min(end, DOC_CAP))]) catch return;
+    const buf = $mod.doc_buf[0..got];
+    if (std.mem.indexOfScalar(u8, buf, 0) != null) return;
+    var n: usize = 0;
+    var pos: usize = 0;
+    if (buf.len >= 3 and std.mem.eql(u8, buf[0..3], "\xEF\xBB\xBF")) pos = 3;
+    while (n < DOC_LINES and pos < buf.len) {
+        const nl = std.mem.indexOfScalarPos(u8, buf, pos, '\n') orelse buf.len;
+        var line = buf[pos..nl];
+        pos = nl + 1;
+        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        var w: usize = 0;
+        var r: usize = 0;
+        while (r < line.len and w < DOC_LINE_CAP) {
+            const b = line[r];
+            if (b < 0x20 or b == 0x7f) {
+                r += 1;
+            } else if (b < 0x80) {
+                $mod.doc_lines[slot][n][w] = b;
+                w += 1;
+                r += 1;
+            } else {
+                const m = std.unicode.utf8ByteSequenceLength(b) catch {
+                    r += 1;
+                    continue;
+                };
+                if (r + m > line.len or w + m > DOC_LINE_CAP) break;
+                _ = std.unicode.utf8Decode(line[r .. r + m]) catch {
+                    r += 1;
+                    continue;
+                };
+                @memcpy($mod.doc_lines[slot][n][w .. w + m], line[r .. r + m]);
+                w += m;
+                r += m;
+            }
+        }
+        $mod.doc_line_len[slot][n] = w;
+        n += 1;
+    }
+    $mod.doc_n[slot] = @intCast(n);
+}
+
 // ============================================================================
 // file-open — mint custody of a file
 // ============================================================================
@@ -173,6 +251,7 @@ fn decodeWave(slot: usize) void {
     $mod.path_len[slot] = n;
     $mod.kinds[slot] = if (isImage(path)) 1 else if (isAudio(path)) 2 else 0;
     if ($mod.kinds[slot] == 2) decodeWave(slot);
+    if ($mod.kinds[slot] == 0) decodeDoc(slot);
 
     if ($mod.mint_seed == 0) {
         $mod.mint_seed = std.crypto.random.int(u64);
@@ -227,6 +306,7 @@ fn decodeWave(slot: usize) void {
     }
     $mod.kinds[slot] = 0;
     $mod.wave_n[slot] = 0;
+    $mod.doc_n[slot] = 0;
 }
 
 // ============================================================================
@@ -319,6 +399,33 @@ fn decodeWave(slot: usize) void {
             .i = @as(i64, @intCast(i)),
             .lo = @as(f64, @floatFromInt($mod.wave_lo[s][i])) / 32768.0,
             .hi = @as(f64, @floatFromInt($mod.wave_hi[s][i])) / 32768.0,
+        });
+    }
+    return .{ .drained = .{} };
+}
+
+// The document seam — what a kind-0 resource carries. `res-doc-n` is the
+// decoded preview-line count (0 = the bytes weren't readable text);
+// `res-doc-each` fires once per line with its index and the line's own
+// text — the same `libs/clay:each` event idiom — the surface draws one
+// text run per firing.
+~[retain]pub tor res-doc-n { slot: i64 } -> i64
+
+~proc res-doc-n|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
+    return $mod.doc_n[s];
+}
+
+~[retain]pub tor res-doc-each { slot: i64 }
+! row DocLine
+| drained
+
+~proc res-doc-each|zig {
+    const s: usize = @intCast(@max(0, @min(slot, $mod.MAX_RESES - 1)));
+    for (0..@intCast(@max(0, $mod.doc_n[s]))) |i| {
+        row(.{
+            .i = @as(i64, @intCast(i)),
+            .text = $mod.doc_lines[s][i][0..$mod.doc_line_len[s][i]],
         });
     }
     return .{ .drained = .{} };

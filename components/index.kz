@@ -14,7 +14,7 @@
 //
 // resource-kind renderers (dispatched on the bridge's res-kind field,
 // never on the path — the kind IS the resource's claim about itself):
-//   0 doc   — generic silk card + id label (the placeholder arm)
+//   0 doc   — `docpage`: the document's own leading lines, decoded at mint
 //   1 image — decoded texture drawn over the silk card
 //   2 audio — `waveform`: per-bucket sample peaks decoded at mint
 
@@ -137,3 +137,26 @@
             | then |> app/omni_img:res-wave-each(slot)
                 ! peak p |> libs/metal:draw.roundrect(f, x: x + @as(f64, @floatFromInt(p.i)) * w / @as(f64, @floatFromInt(wn)), y: y + h / 2.0 - p.hi * h * 0.44 - h * 0.015, w: @max(1.5, w / @as(f64, @floatFromInt(wn)) - 0.75), h: @max(1.5, (p.hi - p.lo) * h * 0.44 + h * 0.03), radius: @min(2.0, w / @as(f64, @floatFromInt(wn)) * 0.5), r: 0.16, g: 0.12, b: 0.08, a)
                 | drained |> _
+
+// A page preview — what a document resource IS, drawn from its own
+// bytes. `slot` is the custody-plane slot the bridge minted; the preview
+// lines were decoded out of the resource at file-open (app/omni_img's
+// seam) and this tor walks them: one shaped text run per line on a 13pt
+// leading, clipped to (x, y, w, h) so a long line ends at the card's
+// edge and a full page breaks mid-line — exactly what a page thumbnail
+// looks like. A resource that minted a doc but decoded to zero lines
+// (binary, unreadable) draws nothing inside its frame — the component
+// invents no text.
+//
+//   docpage(f, slot: r.slot, x, y, w, h, a)
+~pub tor docpage {
+    f: *libs/metal:Frame<frame>,
+    slot: i64,
+    x: f64, y: f64, w: f64, h: f64, a: f64,
+}
+
+~docpage = libs/metal:draw.clip.push(f, x, y, w, h)
+    |> app/omni_img:res-doc-each(slot)
+        ! row l |> libs/metal:draw.text(f, x: x + 2.0, y: y + @as(f64, @floatFromInt(l.i)) * 13.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.75, l.text)
+        | drained |> _
+        |> libs/metal:draw.clip.pop(f)
