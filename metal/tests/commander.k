@@ -26,7 +26,7 @@ import std/io
 import app/omni_img
 import libs/components
 
-std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64], cmdv: 0[i64], hubv: 0[i64], foci: 10[i64], fscan: 0[i64], fwrap: 0[i64] }
+std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64], cmdv: 0[i64], hubv: 0[i64], foci: 10[i64], fscan: 0[i64], fwrap: 0[i64], mic: 0[i64] }
 
 // The solved view — the rects clay hands back each frame. Stores take one
 // scalar type per table, so the f64 geometry lives in its own store.
@@ -139,6 +139,10 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                             |> if (e.alive == 1)
                                                 | then |> if (e.kind == 3)
                                                     | then |> libs/components:caption(win: w, f, text: "siri remote", cx: view.planex + view.planew / 2.0, y: view.planey + view.planeh * 0.82, a: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
+                                    // Hold-to-talk: the mic button's HID event already lands here;
+                                    // its audio rides the HCI-snoop bridge into /tmp/omni_remote_mic.wav.
+                                    |> if (world.mic == 1)
+                                        | then |> libs/components:caption(win: w, f, text: "listening", cx: view.planex + view.planew / 2.0, y: view.planey + view.planeh * 0.10, a: 0.35 + 0.5 * if (world.frame % 60 < 30) @as(f64, @floatFromInt(world.frame % 60)) / 30.0 else @as(f64, @floatFromInt(60 - world.frame % 60)) / 30.0)
                                     // The custody plane — the surface draws what the bridge says lives.
                                     // Orbit: a mint seeds the card at the hub with an outward fling,
                                     // then a damped spring pulls it toward its slot's anchor on the
@@ -299,6 +303,13 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                     |> std/store:stored { world.hubv: 1, world.cmdv: if (world.cmdv == 0) 1 else 0 }
                                 ! remote-button r when r.down == 1 and r.page == 1 and r.button == 134    // back — pop the commander
                                     |> std/store:stored { world.cmdv: 0 }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 4    // mic — hold to talk
+                                    |> std/store:stored { world.mic: 1 }
+                                ! remote-button r when r.down == 0 and r.page == 12 and r.button == 4    // mic release — mint the recording onto the bridge
+                                    |> std/store:stored { world.mic: 0 }
+                                    |> std/bridge:run(br, source: "file-open(path: \"/tmp/omni_remote_mic.wav\")")
+                                        | result _ |> _
+                                        | error _ |> _
                                 ! remote-button r when r.down == 1 and r.page == 12 and r.button == 205   // play — toggle drift
                                     |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
                                 ! remote-button r when r.down == 1 and r.page == 12 and r.button == 48    // power — quit

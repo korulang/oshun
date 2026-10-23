@@ -47,7 +47,20 @@ fn processAtt(dec: ?*anyopaque, att: []const u8, att_handle: u16, out: anytype, 
     if (n <= 0) return;
     stats.frames += 1;
     stats.last_seq = seq;
-    out.writeAll(std.mem.sliceAsBytes(pcm_buf[0..@intCast(n)])) catch {};
+    // session boundary: the remote restarts seq at 0 on every mic-button press
+    if (wav_file != null and session_frames > 0 and last_seq_in_session != null and seq < last_seq_in_session.?) {
+        openSessionWav() catch {};
+    }
+    last_seq_in_session = seq;
+    session_frames += 1;
+    const bytes = std.mem.sliceAsBytes(pcm_buf[0..@intCast(n)]);
+    out.writeAll(bytes) catch {};
+    if (wav_file) |f| {
+        f.seekFromEnd(0) catch {};
+        f.writeAll(bytes) catch {};
+        wav_bytes += bytes.len;
+        wavWriteHeader();
+    }
 }
 
 fn feedAcl(dec: ?*anyopaque, conn: u16, pb: u8, payload: []const u8, att_handle: u16, out: anytype, stats: anytype) void {
@@ -82,12 +95,88 @@ fn feedAcl(dec: ?*anyopaque, conn: u16, pb: u8, payload: []const u8, att_handle:
     processAtt(dec, body[0..l2len], att_handle, out, stats);
 }
 
+var wav_file: ?std.fs.File = null;
+var wav_bytes: u64 = 0;
+var session_idx: u32 = 0;
+var session_frames: u64 = 0;
+var last_seq_in_session: ?u16 = null;
+var link_path_buf: [4096]u8 = undefined;
+var link_path: []const u8 = &.{};
+var stem_buf: [4000]u8 = undefined;
+var stem: []const u8 = &.{};
+var real_path_buf: [4096]u8 = undefined;
+
+fn wavWriteHeader() void {
+    const f = wav_file orelse return;
+    const save = f.getPos() catch 0;
+    f.seekTo(0) catch return;
+    var hdr: [44]u8 = undefined;
+    @memcpy(hdr[0..4], "RIFF");
+    std.mem.writeInt(u32, hdr[4..8], @intCast(@min(wav_bytes + 36, 0xFFFFFFFF)), .little);
+    @memcpy(hdr[8..12], "WAVE");
+    @memcpy(hdr[12..16], "fmt ");
+    std.mem.writeInt(u32, hdr[16..20], 16, .little);
+    std.mem.writeInt(u16, hdr[20..22], 1, .little); // PCM
+    std.mem.writeInt(u16, hdr[22..24], 1, .little); // mono
+    std.mem.writeInt(u32, hdr[24..28], 48000, .little);
+    std.mem.writeInt(u32, hdr[28..32], 48000 * 2, .little);
+    std.mem.writeInt(u16, hdr[32..34], 2, .little);
+    std.mem.writeInt(u16, hdr[34..36], 16, .little);
+    @memcpy(hdr[36..40], "data");
+    std.mem.writeInt(u32, hdr[40..44], @intCast(@min(wav_bytes, 0xFFFFFFFF)), .little);
+    f.writeAll(&hdr) catch {};
+    f.seekTo(save) catch {};
+}
+
+fn openSessionWav() !void {
+    if (wav_file) |f| {
+        f.close();
+        wav_file = null;
+    }
+    session_idx += 1;
+    wav_bytes = 0;
+    session_frames = 0;
+    last_seq_in_session = null;
+    const real = std.fmt.bufPrint(&real_path_buf, "{s}_{d}.wav", .{ stem, session_idx }) catch return;
+    wav_file = std.fs.cwd().createFile(real, .{ .truncate = true }) catch null;
+    wavWriteHeader();
+    // repoint the stable link at the live session file (atomic via rename)
+    if (link_path.len > 0) {
+        var tmp_buf: [4096]u8 = undefined;
+        const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{link_path}) catch return;
+        std.posix.unlink(tmp) catch {};
+        std.posix.symlink(real, tmp) catch return;
+        std.posix.rename(tmp, link_path) catch {};
+    }
+}
+
 pub fn main() !void {
     var args = std.process.args();
     _ = args.next();
     const device = args.next() orelse "C08SD0RX2330";
     var att_handle: u16 = 0x0035;
-    if (args.next()) |hs| att_handle = try std.fmt.parseInt(u16, hs, 0);
+    var wav_path: ?[]const u8 = null;
+    while (args.next()) |a| {
+        if (std.mem.eql(u8, a, "--wav")) {
+            wav_path = args.next();
+        } else {
+            att_handle = try std.fmt.parseInt(u16, a, 0);
+        }
+    }
+    if (wav_path) |p| {
+        // p is the stable link name; sessions land as <stem>_<n>.wav beside it
+        if (std.mem.endsWith(u8, p, ".wav")) {
+            stem = stem_buf[0 .. p.len - 4];
+            @memcpy(stem_buf[0 .. p.len - 4], p[0 .. p.len - 4]);
+        } else {
+            stem = stem_buf[0..p.len];
+            @memcpy(stem_buf[0..p.len], p);
+        }
+        link_path = link_path_buf[0..p.len];
+        @memcpy(link_path_buf[0..p.len], p);
+        std.posix.unlink(link_path) catch {};
+        try openSessionWav();
+    }
 
     var oerr: c_int = 0;
     const dec = opus_decoder_create(48000, 1, &oerr) orelse return error.OpusInit;
