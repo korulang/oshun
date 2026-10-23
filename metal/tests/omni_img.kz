@@ -250,6 +250,27 @@ fn decodeDoc(slot: usize) void {
     const f = std.fs.cwd().openFile(path, .{}) catch
         return .{ .not_found = path };
 
+    // Resolve through symlinks — a card minted on the remote-mic link
+    // should name the session it pointed at, and sidecars (.txt
+    // transcripts) live beside the real file, not the link.
+    var resolved: [std.fs.max_path_bytes]u8 = undefined;
+    const real = std.fs.cwd().realpath(path, &resolved) catch path;
+    const n = @min(real.len, 255);
+
+    // Mint is idempotent on the resolved path — a file already resident
+    // returns its live handle instead of a second card for the same bytes.
+    for (0..$mod.opened) |s| {
+        if ($mod.files[s] != null and $mod.path_len[s] == n and
+            std.mem.eql(u8, $mod.path_buf[s][0..n], real[0..n]))
+        {
+            f.close();
+            $mod.last_minted_len = $mod.handle_len[s];
+            @memcpy($mod.last_minted_buf[0..$mod.last_minted_len],
+                    $mod.handle_buf[s][0..$mod.handle_len[s]]);
+            return .{ .ok = $mod.handle_buf[s][0..$mod.handle_len[s]] };
+        }
+    }
+
     var slot: usize = 0;
     while (slot < $mod.opened) : (slot += 1) {
         if ($mod.files[slot] == null) break;
@@ -259,12 +280,6 @@ fn decodeDoc(slot: usize) void {
         $mod.opened += 1;
     }
     $mod.files[slot] = f;
-    // Resolve through symlinks — a card minted on the remote-mic link
-    // should name the session it pointed at, and sidecars (.txt
-    // transcripts) live beside the real file, not the link.
-    var resolved: [std.fs.max_path_bytes]u8 = undefined;
-    const real = std.fs.cwd().realpath(path, &resolved) catch path;
-    const n = @min(real.len, 255);
     @memcpy($mod.path_buf[slot][0..n], real[0..n]);
     $mod.path_len[slot] = n;
     $mod.kinds[slot] = if (isImage(real)) 1 else if (isAudio(real)) 2 else 0;
