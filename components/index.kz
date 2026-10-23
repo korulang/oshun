@@ -11,8 +11,15 @@
 //   3 caption — measured-centered small system-face text
 //   4 hub     — a resource bridge's presence: pearl orb + id caption
 //   5 button  — a pressable pill: measured label, variants, pointer states
+//
+// resource-kind renderers (dispatched on the bridge's res-kind field,
+// never on the path — the kind IS the resource's claim about itself):
+//   0 doc   — generic silk card + id label (the placeholder arm)
+//   1 image — decoded texture drawn over the silk card
+//   2 audio — `waveform`: per-bucket sample peaks decoded at mint
 
 ~import libs/metal
+~import app/omni_img
 
 // The remote glyph — the surface's input grammar made visible.
 // `tex` is an image.load handle of the remote PNG; `glow` drives the
@@ -105,3 +112,28 @@
     // the label — measured-centered: w = tw + 2·size·0.95 puts the run
     // at x + size·0.95; the line box centers on asc/desc, pressed dip
     |> libs/metal:draw.textface(f, x: x + size * 0.95, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) + (size * 2.43 - asc - desc) / 2.0, size, font: face, r: if (variant == 1) @as(f64, 0.91) else 0.16, g: if (variant == 1) @as(f64, 0.85) else 0.12, b: if (variant == 1) @as(f64, 0.72) else 0.08, a: (if (variant == 2) 0.72 + 0.28 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0) else 0.95) * (if (disabled == 1) @as(f64, 0.45) else 1.0), text)
+
+// A waveform — what an audio resource IS, drawn from its own bytes.
+// `slot` is the custody-plane slot the bridge minted; the peaks were
+// decoded out of the resource at file-open (app/omni_img's seam) and this
+// tor walks them: one rounded bar per bucket, mirrored about a hairline
+// rail — min/max pairs, so a loud passage is a tall bar and silence is a
+// tick. A resource that minted audio but decoded to zero buckets renders
+// its rail alone — the component invents nothing.
+//
+//   waveform(f, slot: r.slot, x, y, w, h, a)
+//
+// Bars sit inside (x, y, w, h): bucket i's slot is w/n wide, its bar
+// spans lo→hi scaled to 88% of the half-height around the centerline.
+~pub tor waveform {
+    f: *libs/metal:Frame<frame>,
+    slot: i64,
+    x: f64, y: f64, w: f64, h: f64, a: f64,
+}
+
+~waveform = libs/metal:draw.rect(f, x, y: y + h / 2.0 - 0.5, w, h: 1.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.30)
+    |> app/omni_img:res-wave-n(slot) : wn
+        |> if (wn > 0)
+            | then |> app/omni_img:res-wave-each(slot)
+                ! peak p |> libs/metal:draw.roundrect(f, x: x + @as(f64, @floatFromInt(p.i)) * w / @as(f64, @floatFromInt(wn)), y: y + h / 2.0 - p.hi * h * 0.44 - h * 0.015, w: @max(1.5, w / @as(f64, @floatFromInt(wn)) - 0.75), h: @max(1.5, (p.hi - p.lo) * h * 0.44 + h * 0.03), radius: @min(2.0, w / @as(f64, @floatFromInt(wn)) * 0.5), r: 0.16, g: 0.12, b: 0.08, a)
+                | drained |> _
