@@ -136,7 +136,10 @@
         |> if (wn > 0)
             | then |> app/omni_img:res-wave-each(slot)
                 ! peak p |> libs/metal:draw.roundrect(f, x: x + @as(f64, @floatFromInt(p.i)) * w / @as(f64, @floatFromInt(wn)), y: y + h / 2.0 - p.hi * h * 0.44 - h * 0.015, w: @max(1.5, w / @as(f64, @floatFromInt(wn)) - 0.75), h: @max(1.5, (p.hi - p.lo) * h * 0.44 + h * 0.03), radius: @min(2.0, w / @as(f64, @floatFromInt(wn)) * 0.5), r: 0.16, g: 0.12, b: 0.08, a)
-                | drained |> _
+                | drained |> app/omni_img:res-transcript-n(slot) : tl
+                    |> if (tl > 0)
+                        | then |> app/omni_img:res-transcript(slot) : tr
+                            |> libs/metal:draw.text(f, x, y: y + h - 13.0, size: 10.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.8, text: tr)
 
 // A page preview — what a document resource IS, drawn from its own
 // bytes. `slot` is the custody-plane slot the bridge minted; the preview
