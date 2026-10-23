@@ -5,35 +5,47 @@ provenance: session
 ts: 2026-10-23
 ---
 
-# The Siri Remote microphone cannot be activated from a Mac — full stop
+# The Siri Remote microphone IS reachable on macOS — by snooping, not commanding
 
-Measured 2026-10-23, product `0x0315` (3rd-gen remote, serial `C08SD0RX2330`), against
-every public and private surface:
+**Corrected 2026-10-23 (same day it was written — the conclusion was wrong within
+hours).** The prior line said remote-mic audio "requires a non-Apple BLE host."
+That was false: GoatRemote streams real decoded audio from this remote on this
+Mac, confirmed five sessions, Opus on ATT handle `0x0035`, PCM in a shm ring.
 
-- Audio is **host-activated**, not button-gated: holding the mic button emits only the
-  `0x0c/0x04` usage press — zero `0xFA` reports — until the paired host writes input-enable
-  `0xAF` to ATT handle `0x001d` and enables notifications on `0x0023` (CCCD `0x0024`).
-  Wire format: report `0xFA`, 99-byte payloads, length-prefixed Opus (CELT WB, 20 ms mono).
-  Documented and working in `azais-corentin/siri-remote` (Linux/BlueZ).
+What was measured and still stands — the *write/command* path is closed:
 
-- macOS severs every write path:
-  - `IOHIDDeviceSetReport` Output type: `0/256` report IDs accepted on all 7 virtual
-    interfaces — rejected before the wire.
-  - Feature writes "succeed" but map to the wrong GATT report; remote refuses (ATT error).
-  - CoreBluetooth hides HID service `0x1812` from third-party sessions entirely —
-    discovery returns only `180A`/`180F`, even for an unpaired remote.
-  - Forged `CBCharacteristic` objects reach bluetoothd correctly (raw ATT handles in the
-    XPC payload — verified via swizzled `sendMsg:args:`) but die with `kCBMsgArgResult
-    = 902`: the daemon gates on the *session's* discovered-attribute table. The system's
-    own HID access is internal to bluetoothd — there is no client-side raw-ATT opcode.
+- `IOHIDDeviceSetReport` Output writes: `0/256` accepted across all 7 virtual
+  interfaces — rejected before the wire.
+- Feature writes "succeed" but land on the wrong GATT report.
+- CoreBluetooth hides HID service `0x1812` from third-party sessions.
+- Forged `CBCharacteristic` writes reach bluetoothd and die at
+  `kCBMsgArgResult = 902` — the daemon gates on the session's
+  discovered-attribute table.
+- DriverKit/kext replacement dead on AMFI even with SIP off (SiriRemoteForge).
 
-- DriverKit/kext replacement is dead on AMFI even with SIP disabled
-  (HOLODATA-COM/SiriRemoteForge experiment, documented).
+What the prior line missed — **the audio doesn't need our activation at all.** The
+remote is host-activated, and macOS's *own* HOGP stack inside bluetoothd does the
+activating for its own session: subscribes the audio CCCD at connect, presses on
+the mic button make the remote stream `0xFA` Opus reports on the wire — while
+IOHID hides them from user space (they route to `AppleEmbeddedBluetoothAudio`).
+The bytes exist; we were watching a presentation layer.
 
-**Therefore:** remote-mic audio requires a non-Apple BLE host — a Linux box or a VM with
-a passthrough USB BLE dongle running the proven driver — streaming PCM/Opus to OMNI over
-a socket. The remote pairs to the relay, so buttons flow through it too; the input plane
-becomes transport-agnostic (HID *or* socket). This is the architecture, not a fallback.
+The read path that works (all replicable, zero GoatRemote code at runtime):
 
-Occludes: any plan that assumes `IOHIDManager` seizure or `CoreBluetooth` can reach the
-remote's audio channel on macOS.
+1. A Bluetooth logging mobileconfig enables deep HCI/firmware tracing — plain
+   plist, we can author our own.
+2. Apple's `packetlogger convert -s -f nhdr` (Additional Tools for Xcode, free)
+   streams live HCI as text — requires root for live capture.
+3. ACL→L2CAP→ATT reassembly → unwrap `0xFA` (seq u16, opus_len, CELT WB 20ms
+   mono) → libopus → PCM. ~300 lines, the wire format is documented in
+   `azais-corentin/siri-remote`.
+
+Architecture for OMNI: a root-scoped helper runs packetlogger → reassembler →
+opus → PCM into a socket/shm; omni consumes it as a bridge-resident resource.
+Buttons stay on the existing IOHID seize. The input plane is transport-agnostic
+*by choice* now (HID + HCI-snoop + future Linux relay), not because a wall
+forced it.
+
+Product note: no $12 dongle, no second machine, no re-pairing — the relay plan
+is demoted to the non-Apple-OS story. Root helper + profile install are the only
+user-visible friction, same as GoatRemote's.
