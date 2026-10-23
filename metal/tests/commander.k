@@ -18,6 +18,7 @@ import libs/metal
 import libs/clay
 import libs/ui
 import libs/math
+import libs/hist
 import std/bridge
 import std/store
 import std/string
@@ -25,7 +26,7 @@ import std/io
 import app/omni_img
 import libs/components
 
-std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64] }
+std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64] }
 
 // The solved view — the rects clay hands back each frame. Stores take one
 // scalar type per table, so the f64 geometry lives in its own store.
@@ -116,7 +117,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                             | drained |> _
                                     // The bridge's presence — the gravitational center the
                                     // custody pool's cards orbit. Drawn under the boot layer.
-                                    |> libs/components:hub(win: w, f, text: "omni", cx: view.planex + view.planew / 2.0, cy: view.planey + view.planeh * 0.48, r: view.planeh * 0.075, glow: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
+                                    |> libs/components:hub(win: w, f, text: "omni", cx: view.planex + view.planew / 2.0, cy: view.planey + view.planeh * 0.48, r: view.planeh * 0.10, glow: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
                                     // Element lifecycle — a row past its ttl dies; keypress kills too.
                                     |> std/store:query(el)
                                         ! query e
@@ -167,10 +168,10 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                                         | err e |> std/io:print.ln("image: {{ e:s }}")
                                                     |> std/store:stored { r.t: if (r.alive == 0) 0.0 else if (world.drift == 0) 0.0 else if (world.frame - r.touched > 240) 1.0 else @as(f64, @floatFromInt(world.frame - r.touched)) / 240.0 }
                                                     |> std/store:stored { r.s: 1.0 - 0.35 * r.t }
-                                                    |> std/store:stored { r.rw: @as(f64, if (r.ar >= 1.0) 150.0 else 150.0 * r.ar) * r.s, r.rh: @as(f64, if (r.ar >= 1.0) 150.0 / r.ar else 150.0) * r.s }
+                                                    |> std/store:stored { r.rw: @as(f64, if (r.ar >= 1.0) view.planeh * 0.34 else view.planeh * 0.34 * r.ar) * r.s, r.rh: @as(f64, if (r.ar >= 1.0) view.planeh * 0.34 / r.ar else view.planeh * 0.34) * r.s }
                                                     |> libs/math:cos(x: @as(f64, @floatFromInt(r.slot)) * 0.6283 + @as(f64, @floatFromInt(world.frame)) * 0.0005) : ca
                                                         |> libs/math:sin(x: @as(f64, @floatFromInt(r.slot)) * 0.6283 + @as(f64, @floatFromInt(world.frame)) * 0.0005) : sa
-                                                            |> std/store:stored { r.vx: (r.vx + (view.planex + view.planew / 2.0 + ca * (view.planeh * 0.28 + r.t * view.planeh * 0.16) - r.px) * 0.04) * 0.78, r.vy: (r.vy + (view.planey + view.planeh * 0.48 + sa * (view.planeh * 0.28 + r.t * view.planeh * 0.16) - r.py) * 0.04) * 0.78 }
+                                                            |> std/store:stored { r.vx: (r.vx + (view.planex + view.planew / 2.0 + ca * (view.planeh * 0.30 + r.t * view.planeh * 0.14) - r.px) * 0.04) * 0.78, r.vy: (r.vy + (view.planey + view.planeh * 0.48 + sa * (view.planeh * 0.30 + r.t * view.planeh * 0.14) - r.py) * 0.04) * 0.78 }
                                                             |> std/store:stored { r.px: r.px + r.vx, r.py: r.py + r.vy }
                                                             |> std/store:stored { r.rx: r.px - r.rw / 2.0, r.ry: r.py - r.rh / 2.0 }
                                                     |> libs/metal:draw.silk(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * @as(f64, if (r.tex > 0) 0.3 else 1.0), angle: 0.25 + @as(f64, @floatFromInt(r.slot)) * 0.4, folds: 2.0, sheen: 1.0, pearl: 0.4 + 0.6 * r.t)
@@ -225,8 +226,38 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                 ! key-down k when k.code == 124
                                     |> std/string:len(s: txt) : n
                                         |> std/store:stored { world.caret: if (world.caret < @as(i64, @intCast(n))) world.caret + 1 else @as(i64, @intCast(n)) }
+                                ! key-down k when k.code == 126
+                                    |> libs/hist:count() : hc
+                                        |> std/store:stored { world.hi: if (world.hi < hc) world.hi + 1 else world.hi }
+                                        |> if (world.hi > 0)
+                                            | then |> libs/hist:get(i: world.hi - 1) : ht
+                                                |> std/string:clear(s: txt)
+                                                |> std/string:append(s: txt, text: ht)
+                                                    | ok |> std/string:len(s: txt) : nl
+                                                        |> std/store:stored { world.caret: @as(i64, @intCast(nl)) }
+                                                    | err _ |> _
+                                ! key-down k when k.code == 125
+                                    |> std/store:stored { world.hi: if (world.hi > 0) world.hi - 1 else 0 }
+                                    |> if (world.hi > 0)
+                                        | then |> libs/hist:get(i: world.hi - 1) : ht
+                                            |> std/string:clear(s: txt)
+                                            |> std/string:append(s: txt, text: ht)
+                                                | ok |> std/string:len(s: txt) : nl
+                                                    |> std/store:stored { world.caret: @as(i64, @intCast(nl)) }
+                                                | err _ |> _
+                                    |> if (world.hi == 0)
+                                        | then |> std/string:clear(s: txt)
+                                            |> std/store:stored { world.caret: 0 }
                                 ! key-down k when k.code == 36
+                                    |> std/string:len(s: txt) : nl0
+                                        |> if (nl0 > 0)
+                                            | then |> libs/hist:push(text: txt.data)
                                     |> std/bridge:run(br, source: txt.data)
+                                        | ok o |> std/string:clear(s: status) |> std/string:append(s: status, text: "minted ")
+                                            | ok |> std/string:append(s: status, text: o)
+                                                | ok |> _
+                                                | err _ |> _
+                                            | err _ |> _
                                         | result _ |> std/string:clear(s: status) |> std/string:append(s: status, text: "ok — minted")
                                             | ok |> _
                                             | err _ |> _
@@ -252,7 +283,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                             | ok |> _
                                             | err _ |> _
                                     |> std/string:clear(s: txt)
-                                    |> std/store:stored { world.caret: 0 }
+                                    |> std/store:stored { world.caret: 0, world.hi: 0 }
                                 ! key-down k when k.code == 48
                                     |> std/store:query(el)
                                         ! query e

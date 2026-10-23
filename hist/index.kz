@@ -1,0 +1,37 @@
+// @korulang/hist — a command-history ring. Shell-style: push on
+// execution, recall walks backward, the most recent entry is index 0.
+// Strings live in module buffers — the caller never owns them.
+
+const std = @import("std");
+
+const CAP = 16;
+
+var buf: [CAP][512]u8 = undefined;
+var len: [CAP]usize = .{0} ** CAP;
+var head: usize = 0; // next write slot
+var count: usize = 0;
+
+~[retain]pub tor push { text: string }
+
+~proc push|zig {
+    const n = @min(text.len, 511);
+    @memcpy($mod.buf[$mod.head][0..n], text[0..n]);
+    $mod.len[$mod.head] = n;
+    $mod.head = ($mod.head + 1) % CAP;
+    if ($mod.count < CAP) $mod.count += 1;
+}
+
+~[retain]pub tor get { i: i64 } -> string
+
+~proc get|zig {
+    const idx: usize = @intCast(@max(0, @min(i, @as(i64, @intCast($mod.count)) - 1)));
+    // head-1 is newest; walk back idx entries.
+    const slot = ($mod.head + CAP - 1 - idx) % CAP;
+    return $mod.buf[slot][0..$mod.len[slot]];
+}
+
+~[retain]pub tor count {} -> i64
+
+~proc count|zig {
+    return @intCast($mod.count);
+}
