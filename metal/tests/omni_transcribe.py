@@ -19,10 +19,142 @@ CMD_QUEUE = "/tmp/omni_voice.cmd"
 os.makedirs(RESAMPLE_DIR, exist_ok=True)
 
 # --- the command gate ----------------------------------------------------
-# Deterministic resolution only. A real reasoner (Kopium / ACP) takes this
-# seat later: transcripts flow to it, its commander-grammar replies land on
-# the same /tmp/omni_voice.cmd queue. Until then, an utterance is either a
-# resolvable command or a caption — nothing is invented.
+# Deterministic resolution first. A real reasoner — an ACP session, `devin
+# acp` over stdio — takes the misses: transcripts flow to it, its
+# commander-grammar replies land on the same /tmp/omni_voice.cmd queue.
+# The agent gets no fs/terminal capabilities: it speaks, the bridge
+# decides. OMNI_ACP=0 disables.
+
+import threading
+import queue as _queue
+
+
+class AcpAgent:
+    """Minimal ACP client — one persistent `devin acp` session over stdio
+    JSON-RPC. No SDK: initialize → session/new → session/prompt, reading
+    agent_message_chunk notifications until the prompt response lands."""
+
+    PREAMBLE = (
+        "You are the reasoning participant on OMNI's custody bridge. A "
+        "human speaks to you through a voice remote; each prompt is a "
+        "transcript. When the utterance is a command, reply with wire "
+        "lines only — one per line:\n"
+        '  file-open(path: "<absolute path>")\n'
+        '  file-close(handle: "<6-hex>")\n'
+        '  say(text: "<text>")\n'
+        "Only real absolute paths from the Files list in the prompt — "
+        "never invent paths. When it isn't a command, reply with a short "
+        "plain sentence."
+    )
+
+    def __init__(self, cmd=("devin", "acp"), cwd="/tmp"):
+        self.proc = subprocess.Popen(
+            list(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=cwd,
+        )
+        self._q = _queue.Queue()
+        self._id = 0
+        self._first = True
+        threading.Thread(target=self._reader, daemon=True).start()
+        self._call("initialize", {
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {"readTextFile": False, "writeTextFile": False},
+                "terminal": False,
+            },
+        })
+        r = self._call("session/new", {"cwd": cwd, "mcpServers": []})
+        self.session_id = (r or {}).get("sessionId")
+
+    def _reader(self):
+        for line in self.proc.stdout:
+            line = line.strip()
+            if line:
+                try:
+                    self._q.put(json.loads(line))
+                except Exception:
+                    pass
+
+    def _send(self, method, params):
+        self._id += 1
+        self.proc.stdin.write(json.dumps(
+            {"jsonrpc": "2.0", "id": self._id, "method": method,
+             "params": params}) + "\n")
+        self.proc.stdin.flush()
+        return self._id
+
+    def _wait(self, rid, timeout=120):
+        end = time.time() + timeout
+        notes = []
+        while time.time() < end:
+            try:
+                m = self._q.get(timeout=1)
+            except _queue.Empty:
+                continue
+            if m.get("id") == rid:
+                return (m.get("result") or {}), notes
+            notes.append(m)
+        return {}, notes
+
+    def _call(self, method, params, timeout=60):
+        r, _ = self._wait(self._send(method, params), timeout)
+        return r
+
+    def prompt(self, text, files, timeout=180):
+        body = text
+        if self._first:
+            body = self.PREAMBLE + "\n\n" + body
+            self._first = False
+        body += "\n\nFiles:\n" + (files or "(none)")
+        _, notes = self._wait(self._send("session/prompt", {
+            "sessionId": self.session_id,
+            "prompt": [{"type": "text", "text": body}],
+        }), timeout)
+        out = []
+        for m in notes:
+            u = (m.get("params") or {}).get("update") or {}
+            if u.get("sessionUpdate") == "agent_message_chunk":
+                c = u.get("content") or {}
+                if c.get("type") == "text":
+                    out.append(c.get("text", ""))
+        return "".join(out)
+
+
+_acp = None
+
+
+def acp_agent():
+    global _acp
+    if _acp is None and os.environ.get("OMNI_ACP", "1") != "0":
+        try:
+            _acp = AcpAgent()
+            sys.stderr.write(f"acp: session {(_acp.session_id or '?')!r} up\n")
+        except Exception as e:
+            sys.stderr.write(f"acp: spawn failed: {e}\n")
+            _acp = False
+    return _acp or None
+
+
+_WIRE_RE = re.compile(
+    r'^(file-open|file-close|say)\((.*)\)\s*$'
+)
+
+
+def acp_wire(reply: str):
+    """Extract wire-shaped lines from an agent reply; file-open paths must
+    exist — same oracle as the resolver."""
+    lines = []
+    for ln in reply.splitlines():
+        ln = ln.strip()
+        m = _WIRE_RE.match(ln)
+        if not m:
+            continue
+        if m.group(1) == "file-open":
+            pm = re.search(r'path:\s*"([^"]*)"', m.group(2))
+            if not pm or not os.path.isfile(pm.group(1)):
+                continue
+        lines.append(ln)
+    return lines
 
 _WORD_NUM = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -72,6 +204,10 @@ def _spoken_path(t):
     return cand if os.path.isfile(cand) else None
 
 
+def known_sessions() -> str:
+    return "\n".join(_session_wavs()[-8:]) or "(none yet)"
+
+
 def resolve_intent(text: str):
     """Deterministic target resolution — fires before asking the model."""
     t = text.lower()
@@ -98,6 +234,19 @@ def command_for(text: str):
     resolved = resolve_intent(text)
     if resolved:
         return "\n".join(resolved), {"type": "resolved", "wire": resolved}
+    agent = acp_agent()
+    if agent and agent.session_id:
+        try:
+            reply = agent.prompt(f"Utterance: {text}", known_sessions())
+        except Exception as e:
+            sys.stderr.write(f"acp prompt: {e}\n")
+            return "", {"type": "acp-error", "error": str(e)}
+        lines = acp_wire(reply)
+        verdict = {"type": "acp", "reply": reply[:2000]}
+        if lines:
+            verdict["wire"] = lines
+            return "\n".join(lines), verdict
+        return "", verdict
     return "", {"type": "no-match"}
 
 
