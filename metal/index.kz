@@ -167,9 +167,10 @@ const msl_src: [:0]const u8 =
     \\// with optional border (kind 0), an atlas glyph (kind 1 — R8 coverage
     \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), an
     \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color),
-    \\// a champagne-silk panel (kind 4 — pearlescent drape field), or a
+    \\// a champagne-silk panel (kind 4 — pearlescent drape field), a
     \\// liquid-glass pane (kind 5 — bezel-lens refraction of the
-    \\// image-atlas backdrop beneath it).
+    \\// image-atlas backdrop beneath it), or a frosted-glass pane
+    \\// (kind 6 — ground-glass scatter of the captured scene texture).
     \\// Each instance clips to its clip rect; clip corners may be rounded.
     \\struct Inst {
     \\    float4 rect;          // x, y, w, h in points
@@ -186,6 +187,8 @@ const msl_src: [:0]const u8 =
     \\                          // short side, sheen strength, pearl fringe.
     \\                          // kind 5: bezel width, refract depth (both in
     \\                          // points), rim-light width, aberration frac
+    \\                          // kind 6: scatter radius, rim-chamfer width
+    \\                          // (both in points), grain sparkle, milk density
     \\};
     \\struct InstOut {
     \\    float4 pos [[position]];
@@ -313,8 +316,10 @@ const msl_src: [:0]const u8 =
     \\}
     \\fragment float4 inst_fragment(InstOut in [[stage_in]],
     \\                             constant Inst *insts [[buffer(0)]],
+    \\                             constant float2 &fvp [[buffer(1)]],
     \\                             texture2d<float> atlas [[texture(0)]],
     \\                             texture2d<float> images [[texture(1)]],
+    \\                             texture2d<float> scene [[texture(2)]],
     \\                             constant float &ftime [[buffer(2)]]) {
     \\    Inst i = insts[in.inst];
     \\    if (in.world.x < i.clip.x || in.world.y < i.clip.y || in.world.x > i.clip.z || in.world.y > i.clip.w)
@@ -438,6 +443,65 @@ const msl_src: [:0]const u8 =
     \\        float gcov = 1.0 - smoothstep(-gaa, gaa, d);
     \\        return float4(c, gcov) * clip_cover;
     \\    }
+    \\    if (i.kind == 6.0) {
+    \\        // Frosted glass — ground-glass scatter over the CAPTURED scene
+    \\        // (scene = texture(2), staged by draw.capture: a same-size copy
+    \\        // of the render target taken at a mid-frame pass boundary, so
+    \\        // the pane frosts the REAL framebuffer — silk, text, images —
+    \\        // not an image-atlas stand-in like kind 5). in.world is this
+    \\        // fragment's position in points; fvp the viewport in points, so
+    \\        // world/fvp is the normalized scene coordinate beneath.
+    \\        // silk: rough = scatter-disc radius in points, edge = rim
+    \\        // chamfer width, grain = sandblast sparkle, milk = scatter
+    \\        // density (0 = clear transmission, 1 = milky body). i.color
+    \\        // rgb = the scattering body's tint, a = pane opacity.
+    \\        constexpr sampler fs(filter::linear, address::clamp_to_edge);
+    \\        float t = max(-d, 0.0);               // depth inside the rim
+    \\        float rough = i.silk.x;
+    \\        float eband = i.silk.y;
+    \\        float ph = fract(sin(dot(i.rect.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
+    \\        float2 suv = in.world / fvp;
+    \\        // The ground rim chamfer bends the look-through inward, up to
+    \\        // ~8pt at the very rim — the liquid-glass ring-normal field,
+    \\        // reused: a ground edge still refracts, only softly.
+    \\        if (eband > 0.0 && t < eband) {
+    \\            float2 n = glass_normal(p, half_size, r);
+    \\            suv -= n * ((1.0 - t / eband) * 8.0) / fvp;
+    \\        }
+    \\        // Scatter: 13 taps on a golden-angle disc, radius `rough`
+    \\        // points, rotated per pane so neighbors share no pattern.
+    \\        float3 acc = scene.sample(fs, suv).rgb;
+    \\        float wsum = 1.0;
+    \\        if (rough > 0.0) {
+    \\            float2 ruv = rough / fvp;
+    \\            for (int k = 0; k < 12; k++) {
+    \\                float a = float(k) * 2.399963 + ph;
+    \\                float rr = sqrt((float(k) + 0.5) / 12.0);
+    \\                acc += scene.sample(fs, suv + float2(cos(a), sin(a)) * rr * ruv).rgb;
+    \\                wsum += 1.0;
+    \\            }
+    \\            acc /= wsum;
+    \\        }
+    \\        // The body: transmitted scatter lifted toward the tint by
+    \\        // density — milk=0 is clear ground glass, milk=1 a milky slab.
+    \\        float milk = clamp(i.silk.w, 0.0, 1.0);
+    \\        float3 col = mix(acc, acc * 0.30 + i.color.rgb * 0.85, milk);
+    \\        // A ground rim catches daylight in its chamfer — soft glow,
+    \\        // strongest at the very edge.
+    \\        if (eband > 0.0 && t < eband) {
+    \\            float eg = 1.0 - t / eband;
+    \\            col += eg * eg * float3(0.14, 0.14, 0.13);
+    \\        }
+    \\        // Sandblast grain: micro-facets twinkle as ftime drifts the
+    \\        // hash — the pane shimmers rather than sitting dead.
+    \\        if (i.silk.z > 0.0) {
+    \\            float g = silk_hash(in.local * 2.3 + ph + float2(ftime * 1.3, -ftime * 0.9));
+    \\            col += (g - 0.5) * i.silk.z * 0.35;
+    \\        }
+    \\        float faa = max(fwidth(d), 0.0001) * 0.5;
+    \\        float fcov = 1.0 - smoothstep(-faa, faa, d);
+    \\        return float4(col, i.color.a * fcov) * clip_cover;
+    \\    }
     \\    float aa = max(fwidth(d), 0.0001) * 0.5;
     \\    float coverage = 1.0 - smoothstep(-aa, aa, d);
     \\    float4 c = i.color;
@@ -494,6 +558,7 @@ const inst_shadow: f32 = 2;
 const inst_image: f32 = 3;
 const inst_silk: f32 = 4;
 const inst_glass: f32 = 5;
+const inst_frost: f32 = 6;
 
 // A clip rect as the shader reads it: x0,y0,x1,y1. An empty stack means the
 // huge unclipped rect — cheap in the fragment (four compares).
@@ -527,9 +592,16 @@ fn instFlush(f: *Frame) void {
     const vp: [2]f32 = .{ f.vp_w, f.vp_h };
     send3(void, *const [2]f32, u64, u64, f.encoder, sel("setVertexBytes:length:atIndex:"), &vp, 8, 1);
     send3(void, Id, u64, u64, f.encoder, sel("setFragmentBuffer:offset:atIndex:"), buf, 0, 0);
+    // The viewport rides fragment buffer(1) beside vertex buffer(1) —
+    // separate per-stage tables; kind 6 turns points into scene uv with it.
+    send3(void, *const [2]f32, u64, u64, f.encoder, sel("setFragmentBytes:length:atIndex:"), &vp, 8, 1);
     send3(void, *const f32, u64, u64, f.encoder, sel("setFragmentBytes:length:atIndex:"), &f.time, 4, 2);
     send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.text.atlas.texture, 0);
     send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.images.texture, 1);
+    // texture(2) is the captured scene (draw.capture's copy of the render
+    // target). Uncaptured frames bind the image atlas — kind-6 draws refuse
+    // to record before a capture, so nothing samples a stale slot.
+    send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.scene_tex.* orelse f.images.texture, 2);
     send4(void, u64, u64, u64, u64, f.encoder, sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), 4, 0, 4, n);
     f.flushed.* += n;
     f.insts.clearRetainingCapacity();
@@ -1408,12 +1480,12 @@ fn drawLiveFrame(win: *Window, cb: *const fn (*Frame) void) void {
     const enc = send1(Id, Id, buf, sel("renderCommandEncoderWithDescriptor:"), desc);
     send1(void, Id, enc, sel("setRenderPipelineState:"), win.pso);
     win.flushed = 0;
-    var f = Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast(CACurrentMediaTime()) };
+    var f = Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast(CACurrentMediaTime()) };
     win.text.beginFrame();
     win.images.beginFrame();
     cb(&f);
     instFlush(&f);
-    send(void, enc, sel("endEncoding"));
+    send(void, f.encoder, sel("endEncoding"));
     if (in_live_resize) {
         // The Zed/gpui ordering under presentsWithTransaction: commit the
         // buffer, waitUntilScheduled bounds the wait to GPU scheduling (NOT
@@ -1545,6 +1617,10 @@ pub const Window = struct {
     flushed: usize,
     text: TextSystem,
     images: ImageAtlas,
+    // draw.capture's staging texture — a Private copy of the render target
+    // taken mid-frame, bound at texture(2) for kind-6 panes. Lazily sized
+    // to the current target; released in window.close.
+    scene_tex: Id,
 };
 
 // A frame in flight — carries the LIVE render encoder, so draw calls inside
@@ -1552,9 +1628,18 @@ pub const Window = struct {
 // the body returns. Pipeline states and viewport ride along so draw tors
 // stay one-borrow calls. `insts` points at the window's persistent instance
 // list; the clip stack is per-frame — a clip pushed inside `! frame` ends
-// with the frame.
+// with the frame. `cmd` and `target` (the command buffer and the pass's
+// color texture) let draw.capture split the pass — it ends `encoder`,
+// blits target into `*scene_tex`, and resumes on a fresh LoadActionLoad
+// encoder swapped into `encoder`, which is why the brackets must end
+// `f.encoder`, not their own local. `captured` flips so kind-6 draws can
+// refuse a pane recorded before its scene exists.
 pub const Frame = struct {
     encoder: Id,
+    cmd: Id,
+    target: Id,
+    scene_tex: *Id,
+    captured: bool,
     device: Id,
     pso: Id,
     pso_rect: Id,
@@ -1817,6 +1902,7 @@ fn buildPipelines(device: Id) error{
         .flushed = 0,
         .text = .init(device, @floatCast(bs0)),
         .images = .init(device),
+        .scene_tex = null,
     };
     live_win = w;
     return .{ .win = w };
@@ -1928,13 +2014,13 @@ fn buildPipelines(device: Id) error{
         $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), win.pso);
 
         win.flushed = 0;
-        var __f = $mod.Frame{ .encoder = enc, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast($mod.CACurrentMediaTime()) };
+        var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast($mod.CACurrentMediaTime()) };
         win.text.beginFrame();
         win.images.beginFrame();
         frame(&__f);
 
         $mod.instFlush(&__f);
-        $mod.send(void, enc, $mod.sel("endEncoding"));
+        $mod.send(void, __f.encoder, $mod.sel("endEncoding"));
         $mod.send1(void, $mod.Id, buf, $mod.sel("presentDrawable:"), drawable);
         $mod.send(void, buf, $mod.sel("commit"));
         // A snapshot request issued inside the frame body is serviced here —
@@ -1961,6 +2047,7 @@ fn buildPipelines(device: Id) error{
     defer objc_autoreleasePoolPop(pool);
     send(void, win.win, sel("close"));
     send(void, win.win, sel("release"));
+    if (win.scene_tex != null) send(void, win.scene_tex, sel("release"));
     win.insts.deinit(std.heap.page_allocator);
     win.text.deinit();
     win.images.deinit();
@@ -2001,6 +2088,8 @@ pub const Surface = struct {
     flushed: usize,
     text: TextSystem,
     images: ImageAtlas,
+    // draw.capture's staging texture — same role as Window.scene_tex.
+    scene_tex: Id,
     // The last committed command buffer, retained — offscreen.wait reads its
     // GPU timestamps. null until the first frame commits.
     last: Id,
@@ -2066,6 +2155,7 @@ pub const Surface = struct {
         .flushed = 0,
         .text = .init(device, @floatCast(scale)),
         .images = .init(device),
+        .scene_tex = null,
         .last = null,
     };
     return .{ .surf = s };
@@ -2105,13 +2195,13 @@ pub const Surface = struct {
     $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), s.pso);
 
     s.flushed = 0;
-    var __f = $mod.Frame{ .encoder = enc, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .time = @floatCast($mod.CACurrentMediaTime()) };
+    var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = s.tex, .scene_tex = &s.scene_tex, .captured = false, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .time = @floatCast($mod.CACurrentMediaTime()) };
     s.text.beginFrame();
     s.images.beginFrame();
     frame(&__f);
 
     $mod.instFlush(&__f);
-    $mod.send(void, enc, $mod.sel("endEncoding"));
+    $mod.send(void, __f.encoder, $mod.sel("endEncoding"));
     $mod.send(void, buf, $mod.sel("commit"));
     if (s.last != null) $mod.send(void, s.last, $mod.sel("release"));
     s.last = $mod.send($mod.Id, buf, $mod.sel("retain"));
@@ -2145,6 +2235,7 @@ pub const Surface = struct {
 
 ~proc offscreen.close|zig {
     if (s.last != null) send(void, s.last, sel("release"));
+    if (s.scene_tex != null) send(void, s.scene_tex, sel("release"));
     send(void, s.tex, sel("release"));
     s.insts.deinit(std.heap.page_allocator);
     s.text.deinit();
@@ -2303,6 +2394,78 @@ pub const Surface = struct {
         .kind = inst_glass,
         .clip_round = 0,
         .silk = .{ @floatCast(bezel), @floatCast(refract), @floatCast(rim), @floatCast(aberr) },
+    });
+}
+
+// Scene capture — the pass boundary that makes the framebuffer sampleable.
+// Records pending instances, ENDS the live render pass, blit-copies the
+// whole render target into the owner's `scene_tex` (recreated when the
+// target's size changed), then reopens the pass on the same target with
+// LoadActionLoad — drawing continues exactly where it was, but texture(2)
+// now holds the scene as it stood at the call. The honest answer to the
+// kind-5 wall: glass can't read its own target, so the target is copied
+// at a boundary the USER picks (the z-order split between backdrop and
+// material). Everything drawn before the call is in the texture; nothing
+// after it is. Repeatable within a frame — each call re-splits.
+~pub tor draw.capture { f: *Frame<frame> }
+
+~proc draw.capture|zig {
+    instFlush(f);
+    send(void, f.encoder, sel("endEncoding"));
+    const tw = send(u64, f.target, sel("width"));
+    const th = send(u64, f.target, sel("height"));
+    var st = f.scene_tex.*;
+    if (st == null or send(u64, st, sel("width")) != tw or send(u64, st, sel("height")) != th) {
+        if (st != null) send(void, st, sel("release"));
+        const tdesc = send4(
+            Id, u64, u64, u64, bool,
+            cls("MTLTextureDescriptor"),
+            sel("texture2DDescriptorWithPixelFormat:width:height:mipmapped:"),
+            80, // same BGRA8Unorm the layer/surface targets
+            tw, th, false,
+        );
+        send1(void, u64, tdesc, sel("setUsage:"), 1 | 2); // ShaderRead | ShaderWrite (blit dst)
+        send1(void, u64, tdesc, sel("setStorageMode:"), 2); // Private
+        st = send1(Id, Id, f.device, sel("newTextureWithDescriptor:"), tdesc);
+        if (st == null) @panic("metal: draw.capture scene texture allocation failed");
+        f.scene_tex.* = st;
+    }
+    const blit = send(Id, f.cmd, sel("blitCommandEncoder"));
+    send2(void, Id, Id, blit, sel("copyFromTexture:toTexture:"), f.target, st);
+    send(void, blit, sel("endEncoding"));
+    const rdesc = send(Id, cls("MTLRenderPassDescriptor"), sel("renderPassDescriptor"));
+    const ratts = send(Id, rdesc, sel("colorAttachments"));
+    const ratt = send1(Id, u64, ratts, sel("objectAtIndexedSubscript:"), 0);
+    send1(void, Id, ratt, sel("setTexture:"), f.target);
+    send1(void, u64, ratt, sel("setLoadAction:"), 1); // Load — the captured scene stays on screen
+    send1(void, u64, ratt, sel("setStoreAction:"), 1);
+    f.encoder = send1(Id, Id, f.cmd, sel("renderCommandEncoderWithDescriptor:"), rdesc);
+    f.captured = true;
+}
+
+// Frosted glass — a pane of ground glass over the captured scene. The
+// pane blurs the real framebuffer beneath it on a scatter disc `rough`
+// points wide, bends the look-through across an `edge`-wide rim chamfer,
+// lifts toward the body tint by `milk` (0 = clear ground glass, 1 =
+// milky slab), and shimmers with sandblast `grain`. r,g,b is the
+// scattering body's tint; a is the pane's opacity. Requires
+// draw.capture earlier in the same frame — without a captured scene
+// there is nothing to frost.
+~pub tor draw.frost { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, rough: f64, edge: f64, grain: f64, milk: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.frost|zig {
+    if (!f.captured) @panic("metal: draw.frost needs draw.capture earlier in the frame — the pane frosts the captured scene");
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = .{ 0, 0, 0, 0 },
+        .clip = curClip(f),
+        .radius = @floatCast(radius),
+        .border_width = 0,
+        .kind = inst_frost,
+        .clip_round = 0,
+        .silk = .{ @floatCast(rough), @floatCast(edge), @floatCast(grain), @floatCast(milk) },
     });
 }
 
