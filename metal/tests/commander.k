@@ -17,6 +17,7 @@ import libs/host
 import libs/metal
 import libs/clay
 import libs/ui
+import libs/math
 import std/bridge
 import std/store
 import std/string
@@ -54,19 +55,19 @@ std/store:new(res, capacity: 10) {
     alive: i64, kind: i64, tex: i64,
     born: i64, touched: i64,
     t: f64, s: f64, ar: f64,
-    rx: f64, ry: f64, rw: f64, rh: f64
+    rx: f64, ry: f64, rw: f64, rh: f64, px: f64, py: f64, vx: f64, vy: f64
 }
 
-std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-| row _ |> std/store:insert(res) { slot: 1, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-    | row _ |> std/store:insert(res) { slot: 2, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-        | row _ |> std/store:insert(res) { slot: 3, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-            | row _ |> std/store:insert(res) { slot: 4, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-                | row _ |> std/store:insert(res) { slot: 5, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-                    | row _ |> std/store:insert(res) { slot: 6, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-                        | row _ |> std/store:insert(res) { slot: 7, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-                            | row _ |> std/store:insert(res) { slot: 8, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
-                                | row _ |> std/store:insert(res) { slot: 9, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0 }
+std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+| row _ |> std/store:insert(res) { slot: 1, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+    | row _ |> std/store:insert(res) { slot: 2, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+        | row _ |> std/store:insert(res) { slot: 3, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+            | row _ |> std/store:insert(res) { slot: 4, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+                | row _ |> std/store:insert(res) { slot: 5, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+                    | row _ |> std/store:insert(res) { slot: 6, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+                        | row _ |> std/store:insert(res) { slot: 7, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+                            | row _ |> std/store:insert(res) { slot: 8, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
+                                | row _ |> std/store:insert(res) { slot: 9, alive: 0, kind: 0, tex: 0, born: 0, touched: 0, t: 0.0, s: 1.0, ar: 1.5, rx: 0.0, ry: 0.0, rw: 0.0, rh: 0.0, px: 0.0, py: 0.0, vx: 0.0, vy: 0.0 }
                                     | row _ |> _
 
 [with]std/bridge:create(id: "omni", scope: "image", world: "/tmp/omni_world"): br
@@ -113,6 +114,9 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                 |> if (rc.ud == 3)
                                                     | then |> std/store:stored { view.planex: rc.x, view.planey: rc.y, view.planew: rc.w, view.planeh: rc.h }
                                             | drained |> _
+                                    // The bridge's presence — the gravitational center the
+                                    // custody pool's cards orbit. Drawn under the boot layer.
+                                    |> libs/components:hub(win: w, f, text: "omni", cx: view.planex + view.planew / 2.0, cy: view.planey + view.planeh * 0.48, r: view.planeh * 0.075, glow: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
                                     // Element lifecycle — a row past its ttl dies; keypress kills too.
                                     |> std/store:query(el)
                                         ! query e
@@ -134,13 +138,19 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                 | then |> if (e.kind == 3)
                                                     | then |> libs/components:caption(win: w, f, text: "siri remote", cx: view.planex + view.planew / 2.0, y: view.planey + view.planeh * 0.82, a: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
                                     // The custody plane — the surface draws what the bridge says lives.
+                                    // Orbit: a mint seeds the card at the hub with an outward fling,
+                                    // then a damped spring pulls it toward its slot's anchor on the
+                                    // ring. The ring slowly turns; staleness sags the target radius —
+                                    // drift is orbital decay, not a lerp to a landing spot.
                                     |> std/store:query(res)
                                         ! query r
                                             |> app/omni_img:res-live(r.slot) : lv
                                                 |> app/omni_img:res-kind(r.slot) : kd
                                                     |> if (lv == 1)
                                                         | then |> if (r.alive == 0)
-                                                            | then |> std/store:stored { r.alive: 1, r.born: world.frame, r.touched: world.frame, r.kind: kd }
+                                                            | then |> libs/math:cos(x: @as(f64, @floatFromInt(r.slot)) * 0.6283) : c0
+                                                                |> libs/math:sin(x: @as(f64, @floatFromInt(r.slot)) * 0.6283) : s0
+                                                                    |> std/store:stored { r.alive: 1, r.born: world.frame, r.touched: world.frame, r.kind: kd, r.px: view.planex + view.planew / 2.0, r.py: view.planey + view.planeh * 0.48, r.vx: c0 * 6.0, r.vy: s0 * 6.0 }
                                                     |> if (lv == 0)
                                                         | then |> if (r.alive == 1)
                                                             | then |> if (r.tex > 0)
@@ -158,7 +168,11 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                     |> std/store:stored { r.t: if (r.alive == 0) 0.0 else if (world.drift == 0) 0.0 else if (world.frame - r.touched > 240) 1.0 else @as(f64, @floatFromInt(world.frame - r.touched)) / 240.0 }
                                                     |> std/store:stored { r.s: 1.0 - 0.35 * r.t }
                                                     |> std/store:stored { r.rw: @as(f64, if (r.ar >= 1.0) 150.0 else 150.0 * r.ar) * r.s, r.rh: @as(f64, if (r.ar >= 1.0) 150.0 / r.ar else 150.0) * r.s }
-                                                    |> std/store:stored { r.rx: (view.planex + (@as(f64, @floatFromInt(r.slot % 5)) + 0.5) * (view.planew / 5.0)) * (1.0 - 0.55 * r.t) + (view.planex + view.planew * 0.30 + @as(f64, @floatFromInt(r.slot % 5)) * view.planew * 0.06) * r.t - r.rw / 2.0, r.ry: (view.planey + 60.0 + @as(f64, if (r.slot < 5) 0.0 else 1.0) * view.planeh * 0.42) * (1.0 - 0.55 * r.t) + (view.planey + view.planeh * 0.24 + @as(f64, if (r.slot < 5) 0.0 else 1.0) * view.planeh * 0.12) * r.t - r.rh / 2.0 }
+                                                    |> libs/math:cos(x: @as(f64, @floatFromInt(r.slot)) * 0.6283 + @as(f64, @floatFromInt(world.frame)) * 0.0005) : ca
+                                                        |> libs/math:sin(x: @as(f64, @floatFromInt(r.slot)) * 0.6283 + @as(f64, @floatFromInt(world.frame)) * 0.0005) : sa
+                                                            |> std/store:stored { r.vx: (r.vx + (view.planex + view.planew / 2.0 + ca * (view.planeh * 0.28 + r.t * view.planeh * 0.16) - r.px) * 0.04) * 0.78, r.vy: (r.vy + (view.planey + view.planeh * 0.48 + sa * (view.planeh * 0.28 + r.t * view.planeh * 0.16) - r.py) * 0.04) * 0.78 }
+                                                            |> std/store:stored { r.px: r.px + r.vx, r.py: r.py + r.vy }
+                                                            |> std/store:stored { r.rx: r.px - r.rw / 2.0, r.ry: r.py - r.rh / 2.0 }
                                                     |> libs/metal:draw.silk(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * @as(f64, if (r.tex > 0) 0.3 else 1.0), angle: 0.25 + @as(f64, @floatFromInt(r.slot)) * 0.4, folds: 2.0, sheen: 1.0, pearl: 0.4 + 0.6 * r.t)
                                                     |> if (r.tex > 0)
                                                         | then |> libs/metal:draw.image(f, r.tex, x: r.rx + 8.0 * r.s, y: r.ry + 8.0 * r.s, w: r.rw - 16.0 * r.s, h: r.rh - 16.0 * r.s)

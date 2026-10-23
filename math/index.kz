@@ -1,0 +1,28 @@
+// @korulang/math — scalar helpers the dialects lean on. Zig builtins
+// dressed as tors so physics and layout code can stay in Koru.
+
+const std = @import("std");
+
+~[retain]pub tor cos { x: f64 } -> f64
+
+~proc cos|zig {
+    return @cos(x);
+}
+
+~[retain]pub tor sin { x: f64 } -> f64
+
+~proc sin|zig {
+    return @sin(x);
+}
+
+~[retain]pub tor sqrt { x: f64 } -> f64
+
+~proc sqrt|zig {
+    return @sqrt(x);
+}
+
+~[retain]pub tor atan2 { y: f64, x: f64 } -> f64
+
+~proc atan2|zig {
+    return std.math.atan2(y, x);
+}

@@ -9,6 +9,7 @@
 //   1 remote  — the Siri-remote glyph: shadow, pulsing outline, image
 //   2 wordmark — measured-centered text in a loaded face
 //   3 caption — measured-centered small system-face text
+//   4 hub     — a resource bridge's presence: pearl orb + id caption
 
 ~import libs/metal
 
@@ -41,3 +42,17 @@
 
 ~caption = libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : cw
     |> libs/metal:draw.text(f, x: cx - cw / 2.0, y, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a, text)
+
+// A resource bridge's on-screen presence — the gravitational center its
+// holdings orbit. A nacre core over a soft halo; `glow` breathes like the
+// remote's outline. `text` is the bridge id, inked beneath.
+~pub tor hub {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    text: string, cx: f64, cy: f64, r: f64, glow: f64,
+}
+
+~hub = libs/metal:draw.silk(f, x: cx - r * 1.8, y: cy - r * 1.8, w: r * 3.6, h: r * 3.6, radius: r * 1.8, r: 0.91, g: 0.85, b: 0.72, a: glow * 0.4, angle: 0.35, folds: 2.0, sheen: 0.8, pearl: 0.9)
+    |> libs/metal:draw.silk(f, x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, r: 0.95, g: 0.88, b: 0.74, a: 0.95, angle: 0.35, folds: 3.0, sheen: 1.0, pearl: 0.55)
+    |> libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : tw
+        |> libs/metal:draw.text(f, x: cx - tw / 2.0, y: cy + r + 10.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: 0.7, text)
