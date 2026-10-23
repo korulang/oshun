@@ -33,6 +33,7 @@
     exe.linkFramework("CoreFoundation");
     exe.linkFramework("CoreText");
     exe.linkFramework("CoreGraphics");
+    exe.linkFramework("IOKit");
 }
 
 const std = @import("std");
@@ -43,9 +44,13 @@ const objc = @cImport({
     @cInclude("objc/objc.h");
 });
 
+// IOKit rides the same cImport as CF — separate units mint nominal-distinct
+// CFAllocator/CFString opaques that don't cast between the two signatures.
 const cf = @cImport({
     @cInclude("CoreFoundation/CoreFoundation.h");
+    @cInclude("IOKit/hid/IOHIDManager.h");
 });
+const hid = cf;
 
 const Id = ?*anyopaque;
 const SEL = objc.SEL;
@@ -947,6 +952,16 @@ pub const ScrollData = struct {
     dy: f64,
 };
 
+pub const RemoteData = struct {
+    // Raw HID usage id — Siri Remote's vocabulary rides the Consumer page
+    // (0x0c: menu-dir 0x42-0x45, select 0x80, play 0xcd, mute 0xe2,
+    // vol 0xe9/0xea, power 0x30, tv 0x60, mic 0x04) except Back, which is
+    // Generic Desktop (0x01) usage 0x86. The surface names meanings.
+    button: u32,
+    page: u32,
+    down: u8,
+};
+
 const Event = union(enum) {
     key_down: KeyData,
     mouse_down: MouseData,
@@ -954,6 +969,7 @@ const Event = union(enum) {
     mouse_move: MouseData,
     mouse_drag: MouseData,
     scroll: ScrollData,
+    remote_button: RemoteData,
 };
 
 var ev_buf: [64]Event = undefined;
@@ -1001,6 +1017,50 @@ fn popEvent() ?Event {
     const e = ev_buf[ev_head];
     ev_head = (ev_head + 1) % ev_buf.len;
     return e;
+}
+
+// ============================================================================
+// Siri Remote (BLE HID) — a SEIZED IOHIDManager owner. Seizure is exclusive:
+// the OS stops acting on the presses (volume/media/power) and they belong
+// entirely to the surface — an Apple Remote is an omni device, not a system
+// mixer control. If open fails (sandboxing), we fall back to passive.
+// Matching is vendor-scoped (0x004c = Apple BLE peripherals).
+// ============================================================================
+
+var hid_mgr: ?hid.IOHIDManagerRef = null;
+
+fn remoteValueCb(_: ?*anyopaque, _: c_int, _: ?*anyopaque, v: hid.IOHIDValueRef) callconv(.c) void {
+    const el = hid.IOHIDValueGetElement(v);
+    const page: u32 = @intCast(hid.IOHIDElementGetUsagePage(el));
+    if (page != 0x0c and page != 0x01) return;
+    const usage: u32 = @intCast(hid.IOHIDElementGetUsage(el));
+    const iv = hid.IOHIDValueGetIntegerValue(v);
+    if (iv != 0 and iv != 1) return; // touch/scroll axes, not buttons
+    pushEvent(.{ .remote_button = .{
+        .button = usage,
+        .page = page,
+        .down = @intCast(iv),
+    } });
+}
+
+fn hidEnsure() void {
+    if (hid_mgr != null) return;
+    const mgr = hid.IOHIDManagerCreate(cf.kCFAllocatorDefault, hid.kIOHIDOptionsTypeNone) orelse return;
+    var vid: i32 = 0x004c;
+    const vnum = cf.CFNumberCreate(cf.kCFAllocatorDefault, cf.kCFNumberSInt32Type, &vid);
+    const kkey = cf.CFStringCreateWithCString(cf.kCFAllocatorDefault, hid.kIOHIDVendorIDKey, cf.kCFStringEncodingUTF8);
+    var keys = [_]cf.CFTypeRef{kkey};
+    var vals = [_]cf.CFTypeRef{vnum};
+    const dict = cf.CFDictionaryCreate(cf.kCFAllocatorDefault, &keys, &vals, 1, &cf.kCFTypeDictionaryKeyCallBacks, &cf.kCFTypeDictionaryValueCallBacks);
+    hid.IOHIDManagerSetDeviceMatching(mgr, dict);
+    if (dict != null) cf.CFRelease(dict);
+    if (kkey != null) cf.CFRelease(kkey);
+    if (vnum != null) cf.CFRelease(vnum);
+    hid.IOHIDManagerRegisterInputValueCallback(mgr, remoteValueCb, null);
+    hid.IOHIDManagerScheduleWithRunLoop(mgr, cf.CFRunLoopGetMain(), cf.kCFRunLoopDefaultMode);
+    if (hid.IOHIDManagerOpen(mgr, hid.kIOHIDOptionsTypeSeizeDevice) != 0)
+        _ = hid.IOHIDManagerOpen(mgr, hid.kIOHIDOptionsTypeNone);
+    hid_mgr = mgr;
 }
 
 // Automation verbs — synthesized input and framebuffer capture. First-class
@@ -1707,6 +1767,7 @@ fn buildPipelines(device: Id) error{
 ! ?mouse-move libs/metal:MouseData
 ! ?mouse-drag libs/metal:MouseData
 ! ?scroll libs/metal:ScrollData
+! ?remote-button libs/metal:RemoteData
 ! ?tray-action libs/host:TrayActionData
 ! ?menu-action libs/host:MenuActionData
 ! ?close
@@ -1717,6 +1778,7 @@ fn buildPipelines(device: Id) error{
     // Live-resize path: during an edge drag this loop is parked inside
     // sendEvent:, so the windowResized: IMP draws through frame_cb instead.
     $mod.frame_cb = frame;
+    $mod.hidEnsure();
     var i: i32 = 0;
     while (i < __cap) : (i += 1) {
         const pool = $mod.objc_autoreleasePoolPush();
@@ -1751,6 +1813,7 @@ fn buildPipelines(device: Id) error{
                 .mouse_move => |m| mouse_move(m),
                 .mouse_drag => |m| mouse_drag(m),
                 .scroll => |s| scroll(s),
+                .remote_button => |r| remote_button(r),
             }
         }
         while ($mod.H.popEvent()) |hev| {

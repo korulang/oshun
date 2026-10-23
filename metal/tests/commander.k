@@ -289,6 +289,18 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                     |> std/store:stored { world.hubv: 1, world.cmdv: if (world.cmdv == 0) 1 else 0 }
                                 ! key-down k when k.code == 2
                                     |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 96   // TV — the remote's Doom-Tab
+                                    |> std/store:query(el)
+                                        ! query e
+                                            |> if (e.alive == 1)
+                                                | then |> std/store:stored { e.alive: 0 }
+                                    |> std/store:stored { world.hubv: 1, world.cmdv: if (world.cmdv == 0) 1 else 0 }
+                                ! remote-button r when r.down == 1 and r.page == 1 and r.button == 134    // back — pop the commander
+                                    |> std/store:stored { world.cmdv: 0 }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 205   // play — toggle drift
+                                    |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 48    // power — quit
+                                    |> libs/host:quit()
                                 ! key-down k when k.code == 53 |> libs/host:quit()
                                 ! close |> libs/host:quit()
                                 | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/string:free(s: txt) |> std/string:free(s: status) |> std/bridge:close(br) |> std/io:print.ln("commander: closed")
