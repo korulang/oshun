@@ -174,6 +174,23 @@ pub fn main() !void {
         }
         link_path = link_path_buf[0..p.len];
         @memcpy(link_path_buf[0..p.len], p);
+        // resume numbering past existing sessions so a restart never truncates
+        if (std.fs.path.dirname(stem)) |dir_path| {
+            const base = std.fs.path.basename(stem);
+            var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch null;
+            if (dir) |*d| {
+                defer d.close();
+                var it = d.iterate();
+                while (it.next() catch null) |ent| {
+                    if (ent.name.len <= base.len + 5) continue;
+                    if (!std.mem.startsWith(u8, ent.name, base)) continue;
+                    if (ent.name[base.len] != '_') continue;
+                    if (!std.mem.endsWith(u8, ent.name, ".wav")) continue;
+                    const n = std.fmt.parseInt(u32, ent.name[base.len + 1 .. ent.name.len - 4], 10) catch continue;
+                    if (n > session_idx) session_idx = n;
+                }
+            }
+        }
         std.posix.unlink(link_path) catch {};
         try openSessionWav();
     }
