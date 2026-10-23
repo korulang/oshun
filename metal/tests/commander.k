@@ -26,7 +26,7 @@ import std/io
 import app/omni_img
 import libs/components
 
-std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64], cmdv: 0[i64], hubv: 0[i64] }
+std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64], cmdv: 0[i64], hubv: 0[i64], foci: 10[i64], fscan: 0[i64], fwrap: 0[i64] }
 
 // The solved view — the rects clay hands back each frame. Stores take one
 // scalar type per table, so the f64 geometry lives in its own store.
@@ -175,6 +175,8 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                             |> std/store:stored { r.vx: (r.vx + (view.planex + view.planew / 2.0 + ca * (view.planeh * 0.30 + r.t * view.planeh * 0.14) - r.px) * 0.04) * 0.78, r.vy: (r.vy + (view.planey + view.planeh * 0.48 + sa * (view.planeh * 0.30 + r.t * view.planeh * 0.14) - r.py) * 0.04) * 0.78 }
                                                             |> std/store:stored { r.px: r.px + r.vx, r.py: r.py + r.vy }
                                                             |> std/store:stored { r.rx: r.px - r.rw / 2.0, r.ry: r.py - r.rh / 2.0 }
+                                                    |> if (r.slot == world.foci and r.alive == 1)
+                                                        | then |> libs/metal:draw.roundrect(f, x: r.rx - 4.0, y: r.ry - 4.0, w: r.rw + 8.0, h: r.rh + 8.0, radius: 13.0, r: 0.95, g: 0.85, b: 0.4, a: 0.9)
                                                     |> libs/metal:draw.silk(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * @as(f64, if (r.tex > 0) 0.3 else 1.0), angle: 0.25 + @as(f64, @floatFromInt(r.slot)) * 0.4, folds: 2.0, sheen: 1.0, pearl: 0.4 + 0.6 * r.t)
                                                     |> if (r.tex > 0)
                                                         | then |> libs/metal:draw.image(f, r.tex, x: r.rx + 8.0 * r.s, y: r.ry + 8.0 * r.s, w: r.rw - 16.0 * r.s, h: r.rh - 16.0 * r.s)
@@ -301,6 +303,60 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                     |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
                                 ! remote-button r when r.down == 1 and r.page == 12 and r.button == 48    // power — quit
                                     |> libs/host:quit()
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 69    // dpad right — focus next card
+                                    |> std/store:stored { world.fscan: 99, world.fwrap: 99 }
+                                    |> std/store:query(res)
+                                        ! query e
+                                            |> if (e.alive == 1 and e.slot > world.foci and e.slot < world.fscan)
+                                                | then |> std/store:stored { world.fscan: e.slot }
+                                            |> if (e.alive == 1 and e.slot < world.fwrap)
+                                                | then |> std/store:stored { world.fwrap: e.slot }
+                                    |> std/store:stored { world.foci: if (world.fscan < 99) world.fscan else world.fwrap }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 68    // dpad left — focus previous card
+                                    |> std/store:stored { world.fscan: -1, world.fwrap: -1 }
+                                    |> std/store:query(res)
+                                        ! query e
+                                            |> if (e.alive == 1 and e.slot < world.foci and e.slot > world.fscan)
+                                                | then |> std/store:stored { world.fscan: e.slot }
+                                            |> if (e.alive == 1 and e.slot > world.fwrap)
+                                                | then |> std/store:stored { world.fwrap: e.slot }
+                                    |> std/store:stored { world.foci: if (world.fscan > -1) world.fscan else world.fwrap }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 66    // dpad up — history back
+                                    |> libs/hist:count() : hc
+                                        |> std/store:stored { world.hi: if (world.hi < hc) world.hi + 1 else world.hi }
+                                        |> if (world.hi > 0)
+                                            | then |> libs/hist:get(i: world.hi - 1) : ht
+                                                |> std/string:clear(s: txt)
+                                                |> std/string:append(s: txt, text: ht)
+                                                    | ok |> std/string:len(s: txt) : nl
+                                                        |> std/store:stored { world.caret: @as(i64, @intCast(nl)) }
+                                                    | err _ |> _
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 67    // dpad down — history forward
+                                    |> std/store:stored { world.hi: if (world.hi > 0) world.hi - 1 else 0 }
+                                    |> if (world.hi > 0)
+                                        | then |> libs/hist:get(i: world.hi - 1) : ht
+                                            |> std/string:clear(s: txt)
+                                            |> std/string:append(s: txt, text: ht)
+                                                | ok |> std/string:len(s: txt) : nl
+                                                    |> std/store:stored { world.caret: @as(i64, @intCast(nl)) }
+                                                | err _ |> _
+                                    |> if (world.hi == 0)
+                                        | then |> std/string:clear(s: txt)
+                                            |> std/store:stored { world.caret: 0 }
+                                ! remote-button r when r.down == 1 and r.page == 12 and r.button == 128   // center — arm file-close on the focused card
+                                    |> if (world.foci < 10)
+                                        | then |> app/omni_img:res-live(slot: world.foci) : fl
+                                            |> if (fl == 1)
+                                                | then |> app/omni_img:res-id(slot: world.foci) : chid
+                                                    |> std/string:clear(s: txt)
+                                                    |> std/string:append(s: txt, text: "file-close(handle: \"")
+                                                        | ok |> std/string:append(s: txt, text: chid)
+                                                            | ok |> std/string:append(s: txt, text: "\")")
+                                                                | ok |> std/string:len(s: txt) : cn
+                                                                    |> std/store:stored { world.caret: @as(i64, @intCast(cn)), world.cmdv: 1, world.hubv: 1 }
+                                                                | err _ |> _
+                                                            | err _ |> _
+                                                        | err _ |> _
                                 ! key-down k when k.code == 53 |> libs/host:quit()
                                 ! close |> libs/host:quit()
                                 | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/string:free(s: txt) |> std/string:free(s: status) |> std/bridge:close(br) |> std/io:print.ln("commander: closed")
