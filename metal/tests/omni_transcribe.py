@@ -243,6 +243,9 @@ def command_for(text: str):
     resolved = resolve_intent(text)
     if resolved:
         return "\n".join(resolved), {"type": "resolved", "wire": resolved}
+    # utterances too small to carry intent don't spend a turn
+    if len(text.split()) < 2:
+        return "", {"type": "no-match"}
     agent = acp_agent()
     if agent and agent.session_id:
         try:
@@ -252,10 +255,17 @@ def command_for(text: str):
             return "", {"type": "acp-error", "error": str(e)}
         lines = acp_wire(reply)
         verdict = {"type": "acp", "reply": reply[:2000]}
+        out = list(lines)
         if lines:
             verdict["wire"] = lines
-            return "\n".join(lines), verdict
-        return "", verdict
+        # the agent's reply is a resource too — a prose answer mints a
+        # doc-kind reply card so the response lives on the same plane
+        if reply.strip():
+            rp = f"/tmp/omni_reply_{int(time.time())}.txt"
+            with open(rp, "w") as rf:
+                rf.write(reply.strip() + "\n")
+            out.append(_open_lines([rp])[0])
+        return "\n".join(out), verdict
     return "", {"type": "no-match"}
 
 
