@@ -167,20 +167,25 @@ const msl_src: [:0]const u8 =
     \\// with optional border (kind 0), an atlas glyph (kind 1 — R8 coverage
     \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), an
     \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color),
-    \\// or a champagne-silk panel (kind 4 — pearlescent drape field).
+    \\// a champagne-silk panel (kind 4 — pearlescent drape field), or a
+    \\// liquid-glass pane (kind 5 — bezel-lens refraction of the
+    \\// image-atlas backdrop beneath it).
     \\// Each instance clips to its clip rect; clip corners may be rounded.
     \\struct Inst {
     \\    float4 rect;          // x, y, w, h in points
     \\    float4 color;         // straight alpha
     \\    float4 border_color;
-    \\    float4 uv;            // atlas u0,v0,u1,v1 — reserved, unused today
+    \\    float4 uv;            // atlas u0,v0,u1,v1 — kinds 1/3 sample it;
+    \\                          // kind 5 reads the backdrop window through it
     \\    float4 clip;          // x0, y0, x1, y1 — huge when unclipped
     \\    float radius;
     \\    float border_width;   // blur sigma for kind 2
     \\    float kind;
     \\    float clip_round;     // corners * 4096 + radius, 0 = square clip
     \\    float4 silk;          // kind 4: fold angle (rad), folds across the
-    \\                          // short side, sheen strength, pearl fringe
+    \\                          // short side, sheen strength, pearl fringe.
+    \\                          // kind 5: bezel width, refract depth (both in
+    \\                          // points), rim-light width, aberration frac
     \\};
     \\struct InstOut {
     \\    float4 pos [[position]];
@@ -278,6 +283,34 @@ const msl_src: [:0]const u8 =
     \\    float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
     \\    return (0.55 * sin(t1) + 0.22 * sin(t2)) * am + 0.60 * sin(w3);
     \\}
+    \\// Liquid glass — bezel-lens optics ported from nanoui's glass.metal
+    \\// (MIT, github.com/justrach/nanoui), the documented sibling of silk.
+    \\// glass_lens maps depth-under-edge t in [0,bezel) to a refraction
+    \\// slope: 0 at the bezel's inner boundary and steepening toward the
+    \\// pane's rim, the profile of a real lens edge. glass_normal is the
+    \\// rounded box's inward-ring direction field — where the bezel's
+    \\// surface faces, which aims both the bend and the rim light.
+    \\static float glass_lens(float t, float bezel) {
+    \\    if (bezel <= 0.0 || t >= bezel) return 0.0;
+    \\    float u = 1.0 - max(t, 0.0) / bezel;
+    \\    float v = 1.0 - u * u * u * u;
+    \\    float a = sqrt(v * sqrt(v));
+    \\    float b = u * u * u;
+    \\    float n = sqrt(a * a + b * b);
+    \\    float s = b / n, c = a / n;
+    \\    float st = s / 1.5;
+    \\    float ct = sqrt(1.0 - st * st);
+    \\    return (s * ct - c * st) / (c * ct + s * st) / 1.1180340;
+    \\}
+    \\static float2 glass_normal(float2 q, float2 h, float radius) {
+    \\    float r = min(radius * 1.5, min(h.x, h.y));
+    \\    float2 a = abs(q) - (h - r);
+    \\    if (a.x > 0.0 || a.y > 0.0) {
+    \\        float2 m = max(a, float2(0.0));
+    \\        return sign(q) * m / sqrt(m.x * m.x + m.y * m.y);
+    \\    }
+    \\    return a.x > a.y ? float2(sign(q.x), 0.0) : float2(0.0, sign(q.y));
+    \\}
     \\fragment float4 inst_fragment(InstOut in [[stage_in]],
     \\                             constant Inst *insts [[buffer(0)]],
     \\                             texture2d<float> atlas [[texture(0)]],
@@ -364,6 +397,47 @@ const msl_src: [:0]const u8 =
     \\        float scov = 1.0 - smoothstep(-saa, saa, d);
     \\        return float4(col, i.color.a * scov) * clip_cover;
     \\    }
+    \\    if (i.kind == 5.0) {
+    \\        // Liquid glass — the pane refracts the image-atlas backdrop
+    \\        // beneath it, after nanoui's fs_glass. i.uv is the pane's own
+    \\        // rect mapped into the backdrop image's atlas window, so in.uv
+    \\        // is the atlas coordinate of the scene pixel under this
+    \\        // fragment; the bezel lens displaces the sample toward the
+    \\        // rim. silk: bezel width and refract depth (points of shift),
+    \\        // rim-light width, chromatic aberration fraction. i.color is
+    \\        // the glass's body tint (a = tint strength, not opacity).
+    \\        constexpr sampler gs(filter::linear, address::clamp_to_edge);
+    \\        float t = max(-d, 0.0); // depth inside the pane's edge
+    \\        float bezel = i.silk.x;
+    \\        float rimw = i.silk.z;
+    \\        float2 n = float2(0.0);
+    \\        if (t < bezel || t < 3.0 * rimw) n = glass_normal(p, half_size, r);
+    \\        float mag = 0.0;
+    \\        if (t < bezel) mag = i.silk.y * glass_lens(t, bezel);
+    \\        // Points -> uv: the pane maps 1:1 into its atlas window.
+    \\        float2 pt2uv = (i.uv.zw - i.uv.xy) / max(i.rect.zw, float2(1.0));
+    \\        float2 off = -n * mag * pt2uv;
+    \\        // Chromatic aberration: red fringes past green, blue inside.
+    \\        float ab = i.silk.w;
+    \\        float4 cr = images.sample(gs, in.uv + off * (1.0 + ab));
+    \\        float4 cg = images.sample(gs, in.uv + off);
+    \\        float4 cb = images.sample(gs, in.uv + off * (1.0 - ab));
+    \\        // BGRA-premultiplied atlas — straighten before compositing.
+    \\        cr.rgb /= max(cr.a, 1e-5);
+    \\        cg.rgb /= max(cg.a, 1e-5);
+    \\        cb.rgb /= max(cb.a, 1e-5);
+    \\        float3 c = float3(cr.r, cg.g, cb.b);
+    \\        c += (i.color.rgb - c) * i.color.a;
+    \\        // Rim light: a Gaussian band under the rim, brightest where
+    \\        // the bezel faces up or down (light from above and below).
+    \\        if (t < 3.0 * rimw) {
+    \\            float rr = t / max(rimw, 0.001);
+    \\            c += (abs(n.y) - c) * (0.35 * exp(-rr * rr));
+    \\        }
+    \\        float gaa = max(fwidth(d), 0.0001) * 0.5;
+    \\        float gcov = 1.0 - smoothstep(-gaa, gaa, d);
+    \\        return float4(c, gcov) * clip_cover;
+    \\    }
     \\    float aa = max(fwidth(d), 0.0001) * 0.5;
     \\    float coverage = 1.0 - smoothstep(-aa, aa, d);
     \\    float4 c = i.color;
@@ -419,6 +493,7 @@ const inst_text: f32 = 1;
 const inst_shadow: f32 = 2;
 const inst_image: f32 = 3;
 const inst_silk: f32 = 4;
+const inst_glass: f32 = 5;
 
 // A clip rect as the shader reads it: x0,y0,x1,y1. An empty stack means the
 // huge unclipped rect — cheap in the fragment (four compares).
@@ -2189,6 +2264,45 @@ pub const Surface = struct {
         .kind = inst_silk,
         .clip_round = 0,
         .silk = .{ @floatCast(angle), @floatCast(folds), @floatCast(sheen), @floatCast(pearl) },
+    });
+}
+
+// Liquid glass — a pane that refracts the image-atlas backdrop beneath
+// it (nanoui's glass.metal optics, instanced). `tex` + `bx,by,bw,bh`
+// describe the backdrop: the image handle and the rect it was drawn at —
+// the pane's own rect maps through that same draw into atlas uv, which
+// the instance's uv field carries and the bezel lens displaces. `bezel`
+// is the bending ring's width in points, `refract` its depth (max shift
+// in points), `rim` the edge light's width, `aberr` the chromatic fringe
+// fraction. r,g,b,a is the glass's body tint (a = tint strength).
+// The backdrop must be drawn first and fully cover the pane.
+~pub tor draw.glass { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, tex: i64, bx: f64, by: f64, bw: f64, bh: f64, bezel: f64, refract: f64, rim: f64, aberr: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.glass|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: draw.glass with an invalid image handle");
+    const img = decoded_images.items[handle - 1];
+    if (!img.live) return;
+    const uv = f.images.slot(handle, img) orelse return; // shelf full — draws one frame late
+    if (bw <= 0 or bh <= 0) return;
+    // The pane's rect -> the atlas window of the backdrop beneath it:
+    // the same affine map the kind-3 image draw applied (world rect ->
+    // image uv), so fragment uv lands on the pixel under the fragment.
+    const su: f32 = (uv[2] - uv[0]) / @as(f32, @floatCast(bw));
+    const sv: f32 = (uv[3] - uv[1]) / @as(f32, @floatCast(bh));
+    const u_lo: f32 = uv[0] + @as(f32, @floatCast(x - bx)) * su;
+    const v_lo: f32 = uv[1] + @as(f32, @floatCast(y - by)) * sv;
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = .{ u_lo, v_lo, u_lo + @as(f32, @floatCast(w)) * su, v_lo + @as(f32, @floatCast(h)) * sv },
+        .clip = curClip(f),
+        .radius = @floatCast(radius),
+        .border_width = 0,
+        .kind = inst_glass,
+        .clip_round = 0,
+        .silk = .{ @floatCast(bezel), @floatCast(refract), @floatCast(rim), @floatCast(aberr) },
     });
 }
 
