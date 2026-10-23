@@ -19,55 +19,10 @@ CMD_QUEUE = "/tmp/omni_voice.cmd"
 os.makedirs(RESAMPLE_DIR, exist_ok=True)
 
 # --- the command gate ----------------------------------------------------
-# The bridge verbs, declared as Needle tools. A transcript that picks one
-# becomes a wire-source line on /tmp/omni_voice.cmd; chatter produces no
-# tool call and stays a caption on its own card.
-
-
-def file_open(path: str):
-    """Open a file as a resource on the bridge. Path must be absolute."""
-
-
-def file_close(handle: str):
-    """Discharge a held resource by its 6-hex custody handle."""
-
-
-def say(text: str):
-    """Print a line on the bridge."""
-
-
-_cmd_agent = None
-
-
-def cmd_agent():
-    global _cmd_agent
-    if _cmd_agent is None:
-        _cmd_agent = needle.Needle(
-            tools=[file_open, file_close, say],
-            system=(
-                "You turn a spoken utterance into a bridge tool call. "
-                "A real file list is provided. To open a file, pick the "
-                "list entry the utterance refers to and copy its path "
-                "EXACTLY, character for character. Ordinal words map to "
-                "index digits (twelve → 12). Never invent a path. "
-                "If the utterance opens no file, make no call."
-            ),
-            stateless=True,
-        )
-    return _cmd_agent
-
-
-def known_sessions() -> str:
-    wavs = []
-    for n in os.listdir(GLOB_DIR):
-        if not (n.startswith("omni_remote_mic_") and n.endswith(".wav")):
-            continue
-        p = os.path.join(GLOB_DIR, n)
-        if os.path.getsize(p) > 44:
-            wavs.append(p)
-    wavs.sort(key=lambda p: int(p.rsplit("_", 1)[1][:-4]) if p.rsplit("_", 1)[1][:-4].isdigit() else 0)
-    return "\n".join(wavs[-8:]) or "(none yet)"
-
+# Deterministic resolution only. A real reasoner (Kopium / ACP) takes this
+# seat later: transcripts flow to it, its commander-grammar replies land on
+# the same /tmp/omni_voice.cmd queue. Until then, an utterance is either a
+# resolvable command or a caption — nothing is invented.
 
 _WORD_NUM = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -143,48 +98,7 @@ def command_for(text: str):
     resolved = resolve_intent(text)
     if resolved:
         return "\n".join(resolved), {"type": "resolved", "wire": resolved}
-    try:
-        r = cmd_agent().complete(
-            f"Utterance: {text}\nFiles:\n{known_sessions()}"
-        )
-    except Exception as e:
-        sys.stderr.write(f"cmd gate: {e}\n")
-        return "", {"error": str(e)}
-    # The model proposes from both buckets — promoted calls AND the ones its
-    # own confidence suppressed. The filesystem disposes: a file_open only
-    # survives when its path is a real file, so chatter's hallucinated args
-    # die on the oracle instead of on the model's mood.
-    promoted = [(c, True) for c in r.get("function_calls") or []]
-    calls = promoted + [(c, False) for c in r.get("suppressed_calls") or []]
-    # Second oracle — intent vocabulary: a call survives only when the
-    # utterance actually says the verb it invokes.
-    low = text.lower()
-    intent = {
-        "file_open": any(w in low for w in ("open", "show", "file", "session", "play")),
-        "file_close": any(w in low for w in ("close", "dismiss", "discharge", "drop")),
-        "say": any(w in low for w in ("say", "print", "speak", "echo")),
-    }
-    lines, seen = [], set()
-    for call, ok in calls:
-        name = call.get("name")
-        args = call.get("arguments") or {}
-        if not intent.get(name):
-            continue
-        if name == "file_open" and isinstance(args.get("path"), str):
-            p = args["path"]
-            if not p.startswith("/") or not os.path.exists(p) or p in seen:
-                continue
-            seen.add(p)
-            e = p.replace("\\", "\\\\").replace('"', '\\"')
-            lines.append(f'file-open(path: "{e}")')
-        elif not ok:
-            continue
-        elif name == "file_close" and isinstance(args.get("handle"), str):
-            lines.append(f'file-close(handle: "{args["handle"]}")')
-        elif name == "say" and isinstance(args.get("text"), str):
-            t = args["text"].replace("\\", "\\\\").replace('"', '\\"')
-            lines.append(f'say(text: "{t}")')
-    return "\n".join(lines), r
+    return "", {"type": "no-match"}
 
 
 def sessions():
@@ -222,12 +136,11 @@ def main():
                 f.write(text + "\n")
             sys.stderr.write(f"{os.path.basename(txt)}: {text!r}\n")
             wire, verdict = command_for(text) if text else ("", {"type": "empty"})
-            calls = verdict.get("function_calls") or []
             sys.stderr.write(
-                f"  → needle: type={verdict.get('type')!r} calls={calls!r}\n"
+                f"  → gate: {verdict.get('type')!r} wire={verdict.get('wire')}\n"
             )
             try:
-                with open(txt[:-4] + ".needle.json", "w") as nf:
+                with open(txt[:-4] + ".gate.json", "w") as nf:
                     json.dump({"text": text, "verdict": verdict, "wire": wire}, nf)
             except Exception:
                 pass
