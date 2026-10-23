@@ -1,0 +1,6 @@
+name: capability-boundary
+kind: inferred
+shape: categorical
+face: in
+membrane: true
+note: a capability was probed and found impossible on this platform — a hard wall, not a missing feature; plans must route around it
