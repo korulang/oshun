@@ -88,6 +88,13 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                             |> libs/metal:frames(win: w, count: 99999)
                                 ! frame f
                                     |> std/store:stored { world.frame: world.frame + 1 }
+                                    // Voice commands — the watcher queues wire source lines; one
+                                    // drains per frame and runs on the bridge like typed input.
+                                    |> app/omni_img:cmd-next()
+                                        ! cmd c |> std/bridge:run(br, source: c.text)
+                                            | result _ |> _
+                                            | error e |> std/io:print.ln("voice cmd: {{ e.message:s }}")
+                                        | drained |> _
                                     |> libs/metal:window.size(win: w) : sz
                                     // The room.
                                     |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, sz.w, sz.h, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)

@@ -68,6 +68,17 @@ pub const DocLine = struct {
     text: []const u8,
 };
 
+// One pending wire command — the voice pipeline's output. The Whistle
+// watcher appends wire source lines to /tmp/omni_voice.cmd; cmd-next
+// pops one line per call and fires it, so a frame drains at most one
+// command and a crash mid-run can't re-fire the same line next frame.
+pub const WireCmd = struct {
+    text: []const u8,
+};
+
+var cmd_buf: [4096]u8 = undefined;
+const CMD_QUEUE = "/tmp/omni_voice.cmd";
+
 var files: [MAX_RESES]?std.fs.File = .{null} ** MAX_RESES;
 var opened: usize = 0;
 
@@ -456,6 +467,31 @@ fn transcriptRead(s: usize) usize {
 ~proc res-doc-n|zig {
     const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
     return $mod.doc_n[s];
+}
+
+// The command seam — a wire-source line the voice pipeline queued for
+// this bridge. Fires once per call when a line is pending; the caller
+// runs it through std/bridge:run like any other wire turn.
+~[retain]pub tor cmd-next { }
+! cmd WireCmd
+| drained
+
+~proc cmd-next|zig {
+    const qf = std.fs.cwd().openFile($mod.CMD_QUEUE, .{}) catch return .{ .drained = .{} };
+    const got = qf.readAll($mod.cmd_buf[0..]) catch {
+        qf.close();
+        return .{ .drained = .{} };
+    };
+    qf.close();
+    const buf = $mod.cmd_buf[0..got];
+    if (buf.len == 0) return .{ .drained = .{} };
+    const nl = std.mem.indexOfScalar(u8, buf, '\n') orelse buf.len;
+    const wf = std.fs.cwd().createFile($mod.CMD_QUEUE, .{}) catch return .{ .drained = .{} };
+    wf.writeAll(buf[@min(nl + 1, buf.len)..]) catch {};
+    wf.close();
+    if (nl == 0) return .{ .drained = .{} };
+    cmd(.{ .text = buf[0..nl] });
+    return .{ .drained = .{} };
 }
 
 ~[retain]pub tor res-doc-each { slot: i64 }
