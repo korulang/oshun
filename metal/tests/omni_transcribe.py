@@ -47,10 +47,19 @@ class AcpAgent:
         "plain sentence."
     )
 
-    def __init__(self, cmd=("devin", "acp"), cwd="/tmp"):
+    def __init__(self, cmd=None, cwd="/tmp"):
+        # launchd's PATH doesn't carry ~/.local/bin — resolve devin absolutely
+        if cmd is None:
+            import shutil
+            devin = shutil.which("devin") or os.path.expanduser(
+                "~/.local/bin/devin")
+            cmd = (devin, "acp")
+        env = dict(os.environ)
+        env["PATH"] = env.get("PATH", "") + ":" + os.path.expanduser("~/.local/bin")
         self.proc = subprocess.Popen(
             list(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, bufsize=1, cwd=cwd,
+            env=env,
         )
         self._q = _queue.Queue()
         self._id = 0
