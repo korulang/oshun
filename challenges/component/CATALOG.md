@@ -22,4 +22,4 @@ Do not clone them.
 
 | Replay | Component | Thesis | Walls |
 |--------|-----------|--------|-------|
-| — | — | — | — |
+| replay-component-01 | button | A nanoui button is a measured, self-hit-testing pill — the tor takes raw pointer scalars and derives hover/press/disabled against its own text-measured rect | runtime `if` arms need f64-typed literals (`@as(f64, …)`), bare comptime floats die at zig codegen; no mid-chain `let` — pointer predicates repeat verbatim per arg |

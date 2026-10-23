@@ -10,6 +10,7 @@
 //   2 wordmark — measured-centered text in a loaded face
 //   3 caption — measured-centered small system-face text
 //   4 hub     — a resource bridge's presence: pearl orb + id caption
+//   5 button  — a pressable pill: measured label, variants, pointer states
 
 ~import libs/metal
 
@@ -56,3 +57,51 @@
     |> libs/metal:draw.silk(f, x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, r: 0.95, g: 0.88, b: 0.74, a: 0.95, angle: 0.35, folds: 3.0, sheen: 1.0, pearl: 0.55)
     |> libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : tw
         |> libs/metal:draw.text(f, x: cx - tw / 2.0, y: cy + r + 10.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: 0.7, text)
+
+// A pressable pill — nanoui's button (widgets.zig, kit/button.zig) carried
+// into the material. The box is MEASURED, not given: width is the shaped
+// label plus size*0.95 of padding a side, height size*2.43, corner
+// size*0.57 — nanoui's md numbers. The pointer is read inside the
+// boundary: `mx`/`my`/`down` are the raw event scalars and the component
+// derives hover and press against its own measured rect, so no caller
+// re-measures to hit-test. Press dips the control 0.5pt and darkens the
+// body (nanoui's offset.y + mix-to-black); disabled fades everything to
+// 0.45 and swallows the pointer; dragging off mid-press un-presses until
+// the pointer returns, the macOS behavior.
+//
+//   variant: 0 secondary — pearl panel, hairline border, floor shadow
+//            1 primary   — ink silk, champagne label, sheen on hover
+//            2 ghost     — bare label; a pearl wash only while hot
+//   mx/my    — pointer position in points (negative = pointer off-surface)
+//   down     — 1 while the pointer is held
+//   disabled — 1 dims the whole control and drops hover/press
+~pub tor button {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    text: string, size: f64, face: i64,
+    x: f64, y: f64,
+    variant: i64, mx: f64, my: f64, down: i64, disabled: i64,
+}
+
+// Layers are drawn unconditionally — the variant and pointer state live
+// in the alpha expressions, the same modulation remote and hub use (a
+// zero-alpha layer is a no-op). The hit predicate is repeated verbatim;
+// a `|>` chain binds only call results, there is no mid-chain `let`.
+~button = libs/metal:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
+    |> libs/metal:text.ascent(win, size, face) : asc
+    |> libs/metal:text.descent(win, size, face) : desc
+    // floor shadow — secondary only; deepens under the pointer
+    |> libs/metal:draw.shadow(f, x, y: y + 1.0 + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, blur: 2.0 + (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 2.0) else 0.0), r: 0.40, g: 0.30, b: 0.16, a: (0.28 + 0.12 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
+    // secondary body — pearl panel; fill closes up and the hairline
+    // warms to gold on hover, presses toward the border tone
+    |> libs/metal:draw.panel(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97 - 0.09 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.94 - 0.11 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.86 - 0.16 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: (0.80 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0), bw: 1.0, br: 0.45 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bg: 0.35 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bb: 0.22 + 0.18 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), ba: (0.55 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
+    // primary body — ink silk; sheen and pearl rise under the pointer,
+    // the body sinks and darkens under the press
+    |> libs/metal:draw.silk(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.20 - 0.04 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.15 - 0.03 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.10 - 0.02 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: 0.96 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 1) @as(f64, 1.0) else 0.0), angle: 0.35, folds: 1.5, sheen: 0.5 + 0.5 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0) - 0.3 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), pearl: 0.3 + 0.5 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
+    // ghost — no body until hot; a pearl wash while hovered or held
+    |> libs/metal:draw.roundrect(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97, g: 0.94, b: 0.86, a: (0.30 + 0.20 * (if (down == 1) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
+    // hover ring — the champagne focus line outside the body
+    |> libs/metal:draw.panel(f, x: x - 2.0, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) - 2.0, w: tw + size * 1.9 + 4.0, h: size * 2.43 + 4.0, radius: size * 0.57 + 2.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.40, ba: 0.55 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant != 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
+    // the label — measured-centered: w = tw + 2·size·0.95 puts the run
+    // at x + size·0.95; the line box centers on asc/desc, pressed dip
+    |> libs/metal:draw.textface(f, x: x + size * 0.95, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) + (size * 2.43 - asc - desc) / 2.0, size, font: face, r: if (variant == 1) @as(f64, 0.91) else 0.16, g: if (variant == 1) @as(f64, 0.85) else 0.12, b: if (variant == 1) @as(f64, 0.72) else 0.08, a: (if (variant == 2) 0.72 + 0.28 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0) else 0.95) * (if (disabled == 1) @as(f64, 0.45) else 1.0), text)
