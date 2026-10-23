@@ -782,8 +782,9 @@ const TextSystem = struct {
 // lazily after every deferred shelf growth clears it.
 // ============================================================================
 
-const DecodedImage = struct { pixels: []u8, w: u32, h: u32 };
+const DecodedImage = struct { pixels: []u8, w: u32, h: u32, refs: u32, live: bool, path: []u8 };
 var decoded_images: std.ArrayList(DecodedImage) = .empty;
+var image_paths: std.StringHashMapUnmanaged(u32) = .empty;
 
 // Font faces loaded from files — font.load appends a retained CGFont and
 // hands back the 1-based index; TextSystem.font wraps it in a CTFont at
@@ -2284,6 +2285,17 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     const pool = objc_autoreleasePoolPush();
     defer objc_autoreleasePoolPop(pool);
 
+    // Path-keyed dedup: reopening one file shares one decode. Live check
+    // guards a tombstone left by image.free — a dead handle decodes fresh.
+    if (image_paths.get(path)) |h| {
+        const e = &decoded_images.items[h - 1];
+        if (e.live) {
+            e.refs += 1;
+            _ = win.images.slot(h, e.*);
+            return .{ .img = @as(i64, h) };
+        }
+    }
+
     var pbuf: [1024]u8 = undefined;
     const pstr = cf.CFStringCreateWithCString(null, cstr(path, &pbuf), cf.kCFStringEncodingUTF8);
     const nsimg = send1(
@@ -2316,13 +2328,35 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     cf.CFRelease(cs);
     send(void, nsimg, sel("release"));
 
-    const img: DecodedImage = .{ .pixels = buf, .w = @intCast(w), .h = @intCast(h) };
+    const path_copy = std.heap.page_allocator.dupe(u8, path) catch @panic("metal: OOM on image path");
+    const img: DecodedImage = .{ .pixels = buf, .w = @intCast(w), .h = @intCast(h), .refs = 1, .live = true, .path = path_copy };
     decoded_images.append(std.heap.page_allocator, img) catch @panic("metal: OOM registering image");
     const handle: u32 = @intCast(decoded_images.items.len);
+    image_paths.put(std.heap.page_allocator, path_copy, handle) catch @panic("metal: OOM on image path map");
     // Eager pack into this window's atlas — if it doesn't fit the slot
     // records needs_reset and draw.image re-pins it after the grow.
     _ = win.images.slot(handle, img);
     return .{ .img = @as(i64, handle) };
+}
+
+// Release one reference on a decoded image — the last ref frees its
+// pixels and drops the path key so a later load decodes fresh. Returns
+// the remaining refcount; the atlas slot idles until the next repack.
+~pub tor image.free { tex: i64 } -> i64
+
+~proc image.free|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: image.free with an invalid image handle");
+    const e = &decoded_images.items[handle - 1];
+    if (!e.live) return 0;
+    e.refs -= 1;
+    if (e.refs > 0) return @intCast(e.refs);
+    e.live = false;
+    _ = image_paths.remove(e.path);
+    std.heap.page_allocator.free(e.path);
+    std.heap.page_allocator.free(e.pixels);
+    e.pixels = undefined;
+    return 0;
 }
 
 // Pixel dimensions of a decoded image handle — surfaces need these to
@@ -2332,6 +2366,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 ~proc image.width|zig {
     const handle: u32 = @intCast(tex);
     if (handle == 0 or handle > decoded_images.items.len) @panic("metal: image.width with an invalid image handle");
+    if (!decoded_images.items[handle - 1].live) return 0;
     return @intCast(decoded_images.items[handle - 1].w);
 }
 
@@ -2340,6 +2375,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 ~proc image.height|zig {
     const handle: u32 = @intCast(tex);
     if (handle == 0 or handle > decoded_images.items.len) @panic("metal: image.height with an invalid image handle");
+    if (!decoded_images.items[handle - 1].live) return 0;
     return @intCast(decoded_images.items[handle - 1].h);
 }
 
@@ -2351,6 +2387,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     const handle: u32 = @intCast(tex);
     if (handle == 0 or handle > decoded_images.items.len) @panic("metal: draw.image with an invalid image handle");
     const img = decoded_images.items[handle - 1];
+    if (!img.live) return;
     const uv = f.images.slot(handle, img) orelse return; // shelf full — draws one frame late
     instPush(f, .{
         .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
@@ -2375,6 +2412,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     const handle: u32 = @intCast(tex);
     if (handle == 0 or handle > decoded_images.items.len) @panic("metal: draw.imagetint with an invalid image handle");
     const img = decoded_images.items[handle - 1];
+    if (!img.live) return;
     const uv = f.images.slot(handle, img) orelse return;
     instPush(f, .{
         .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },

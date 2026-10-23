@@ -102,7 +102,9 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                         | then |> std/store:stored { r.alive: 1, r.born: world.frame, r.touched: world.frame, r.kind: kd }
                                                 |> if (lv == 0)
                                                     | then |> if (r.alive == 1)
-                                                        | then |> std/store:stored { r.alive: 0, r.tex: 0 }
+                                                        | then |> if (r.tex > 0)
+                                                            | then |> libs/metal:image.free(r.tex)
+                                                        |> std/store:stored { r.alive: 0, r.tex: 0 }
                                                 |> if (r.alive == 1)
                                                     | then |> if (r.kind == 1)
                                                         | then |> if (r.tex == 0)
