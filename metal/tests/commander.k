@@ -181,7 +181,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                             |> std/store:stored { r.rx: r.px - r.rw / 2.0, r.ry: r.py - r.rh / 2.0 }
                                                     |> if (r.slot == world.foci and r.alive == 1)
                                                         | then |> libs/metal:draw.roundrect(f, x: r.rx - 4.0, y: r.ry - 4.0, w: r.rw + 8.0, h: r.rh + 8.0, radius: 13.0, r: 0.95, g: 0.85, b: 0.4, a: 0.9)
-                                                    |> libs/metal:draw.silk(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * @as(f64, if (r.tex > 0) 0.3 else 1.0), angle: 0.25 + @as(f64, @floatFromInt(r.slot)) * 0.4, folds: 2.0, sheen: 1.0, pearl: 0.4 + 0.6 * r.t)
+                                                    |> libs/metal:draw.panel(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.97, g: 0.95, b: 0.89, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * @as(f64, if (r.tex > 0) 0.55 else 0.9), bw: 1.0, br: 0.80, bg: 0.70, bb: 0.55, ba: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.5 * r.t) * 0.5)
                                                     |> if (r.tex > 0)
                                                         | then |> libs/metal:draw.image(f, r.tex, x: r.rx + 8.0 * r.s, y: r.ry + 8.0 * r.s, w: r.rw - 16.0 * r.s, h: r.rh - 16.0 * r.s)
                                                     // kind dispatch — the bridge's kind field picks the
