@@ -2325,6 +2325,24 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     return .{ .img = @as(i64, handle) };
 }
 
+// Pixel dimensions of a decoded image handle — surfaces need these to
+// honor aspect instead of stretching every picture into a fixed card.
+~pub tor image.width { tex: i64 } -> i64
+
+~proc image.width|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: image.width with an invalid image handle");
+    return @intCast(decoded_images.items[handle - 1].w);
+}
+
+~pub tor image.height { tex: i64 } -> i64
+
+~proc image.height|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: image.height with an invalid image handle");
+    return @intCast(decoded_images.items[handle - 1].h);
+}
+
 // One image-atlas rect in PIXEL space — `tex` is the 1-based handle
 // image.load returned (or any imageData Clay hands back verbatim).
 ~pub tor draw.image { f: *Frame<frame>, tex: i64, x: f64, y: f64, w: f64, h: f64 }
@@ -2337,6 +2355,30 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     instPush(f, .{
         .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
         .color = .{ 1, 1, 1, 1 },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = uv,
+        .clip = curClip(f),
+        .radius = 0,
+        .border_width = 0,
+        .kind = inst_image,
+        .clip_round = 0,
+        .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// Same texture draw as draw.image with an exposed color multiplier —
+// a black offset copy is a silhouette shadow, an expanded copy is an
+// outline hugging the image's own alpha edge, a pearl tint is a ghost.
+~pub tor draw.imagetint { f: *Frame<frame>, tex: i64, x: f64, y: f64, w: f64, h: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.imagetint|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: draw.imagetint with an invalid image handle");
+    const img = decoded_images.items[handle - 1];
+    const uv = f.images.slot(handle, img) orelse return;
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
         .border_color = .{ 0, 0, 0, 0 },
         .uv = uv,
         .clip = curClip(f),

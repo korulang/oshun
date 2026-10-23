@@ -1,0 +1,195 @@
+// OMNI's first vocabulary — file resources on the custody plane.
+//
+// `file-open` mints an obligation through the bridge: the returned string
+// is an opaque 6-hex handle the pool books (created_by_event=file-open,
+// type=string) and `file-close` discharges by consuming it. The module's
+// own table records path + kind per slot — the surface reads those through
+// the seam tors below, which are deliberately NOT in the register: a handle
+// is never something to ask for, it is something you were given.
+//
+// kind: 0 = generic document, 1 = image (by extension). The bridge owns
+// custody; the app owns the decoded pixels — views in the app, facts on
+// the bridge.
+
+~import std/runtime
+
+const std = @import("std");
+
+const MAX_RESES = 10;
+
+var files: [MAX_RESES]?std.fs.File = .{null} ** MAX_RESES;
+var opened: usize = 0;
+
+var handle_buf: [MAX_RESES][16]u8 = undefined;
+var handle_len: [MAX_RESES]usize = .{0} ** MAX_RESES;
+var path_buf: [MAX_RESES][256]u8 = undefined;
+var path_len: [MAX_RESES]usize = .{0} ** MAX_RESES;
+var kinds: [MAX_RESES]i64 = .{0} ** MAX_RESES;
+
+var last_minted_buf: [16]u8 = undefined;
+var last_minted_len: usize = 0;
+
+var mint_seed: u64 = 0;
+var mint_count: u32 = 0;
+
+fn slotOf(handle: []const u8) ?usize {
+    var s: usize = 0;
+    while (s < $mod.opened) : (s += 1) {
+        if ($mod.files[s] != null and
+            std.mem.eql(u8, $mod.handle_buf[s][0..$mod.handle_len[s]], handle))
+        {
+            return s;
+        }
+    }
+    return null;
+}
+
+fn isImage(path: []const u8) bool {
+    const exts = [_][]const u8{ ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff" };
+    for (exts) |e| {
+        if (std.mem.endsWith(u8, path, e)) return true;
+    }
+    return false;
+}
+
+// ============================================================================
+// file-open — mint custody of a file
+// ============================================================================
+
+~pub tor file-open { path: string }
+| ok string<open!>
+| not-found string
+
+~proc file-open|zig {
+    const f = std.fs.cwd().openFile(path, .{}) catch
+        return .{ .not_found = path };
+
+    var slot: usize = 0;
+    while (slot < $mod.opened) : (slot += 1) {
+        if ($mod.files[slot] == null) break;
+    } else {
+        slot = $mod.opened;
+        if (slot >= MAX_RESES) @panic("omni: too many open resources");
+        $mod.opened += 1;
+    }
+    $mod.files[slot] = f;
+    const n = @min(path.len, 255);
+    @memcpy($mod.path_buf[slot][0..n], path[0..n]);
+    $mod.path_len[slot] = n;
+    $mod.kinds[slot] = if (isImage(path)) 1 else 0;
+
+    if ($mod.mint_seed == 0) {
+        $mod.mint_seed = std.crypto.random.int(u64);
+    }
+    var mix = $mod.mint_seed;
+    mix ^= mix >> 33;
+    mix *%= 0xff51afd7ed558ccd;
+    mix ^= mix >> 33;
+    mix +%= @as(u64, $mod.mint_count + 1) *% 0x9e3779b97f4a7c15;
+    mix ^= mix >> 33;
+    $mod.mint_count += 1;
+
+    var candidate: [8]u8 = undefined;
+    var attempts: u32 = 0;
+    while (true) : (attempts += 1) {
+        const c = std.fmt.bufPrint(&candidate, "{x:0>6}", .{@as(u24, @truncate(mix))}) catch @panic("omni: handle too long");
+        var collides = false;
+        for (0..$mod.opened) |s| {
+            if ($mod.files[s] != null and
+                std.mem.eql(u8, $mod.handle_buf[s][0..$mod.handle_len[s]], c))
+            {
+                collides = true;
+                break;
+            }
+        }
+        if (!collides) {
+            @memcpy($mod.handle_buf[slot][0..c.len], c);
+            $mod.handle_len[slot] = c.len;
+            break;
+        }
+        if (attempts > 32) @panic("omni: handle collision after retries");
+        mix ^= mix >> 33;
+        mix *%= 0xbf58476d1ce4e5b9;
+        mix ^= mix >> 29;
+    }
+    $mod.last_minted_len = $mod.handle_len[slot];
+    @memcpy($mod.last_minted_buf[0..$mod.last_minted_len], $mod.handle_buf[slot][0..$mod.handle_len[slot]]);
+    return .{ .ok = $mod.handle_buf[slot][0..$mod.handle_len[slot]] };
+}
+
+// ============================================================================
+// file-close — discharge custody
+// ============================================================================
+
+~pub tor file-close { handle: string<!open> }
+
+~proc file-close|zig {
+    const slot = slotOf(handle) orelse @panic("omni: close on a handle this module never minted");
+    if ($mod.files[slot]) |f| {
+        f.close();
+        $mod.files[slot] = null;
+    }
+}
+
+// ============================================================================
+// say — the voice is a tool call like any other
+// ============================================================================
+
+~pub tor say { text: string }
+
+~proc say|zig {
+    std.debug.print("      {s}\n", .{text});
+}
+
+// ============================================================================
+// THE SEAM — surface reads, NOT in the register
+// ============================================================================
+//
+// The surface enumerates what it may draw through these: slot-stable ids,
+// path + kind metadata, and liveness. They mirror the pool because mint and
+// release both flow through this module's registered verbs — the bridge's
+// discharge paths call file-close.
+
+~[retain]pub tor res-max {} -> i64
+
+~proc res-max|zig {
+    return @intCast(MAX_RESES);
+}
+
+~[retain]pub tor res-live { slot: i64 } -> i64
+
+~proc res-live|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
+    return if (s < $mod.opened and $mod.files[s] != null) 1 else 0;
+}
+
+~[retain]pub tor res-id { slot: i64 } -> string
+
+~proc res-id|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
+    return $mod.handle_buf[s][0..$mod.handle_len[s]];
+}
+
+~[retain]pub tor res-path { slot: i64 } -> string
+
+~proc res-path|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
+    return $mod.path_buf[s][0..$mod.path_len[s]];
+}
+
+~[retain]pub tor res-kind { slot: i64 } -> i64
+
+~proc res-kind|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
+    return $mod.kinds[s];
+}
+
+// ============================================================================
+// THE PERMISSION MODEL
+// ============================================================================
+
+~std/runtime:register(scope: "image") {
+    file-open(10)
+    file-close(1)
+    say(1)
+}

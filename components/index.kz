@@ -1,0 +1,43 @@
+// @korulang/components — OMNI's element vocabulary above libs/metal.
+//
+// A component is a named draw chain plus a kind tag. A ui store row is a
+// variant-by-convention: `kind` says which fields the render arm reads,
+// the dispatch ladder is the match. Growing the vocabulary is one tor
+// here plus one `if (e.kind == N)` arm in the consumer.
+//
+// kind registry:
+//   1 remote  — the Siri-remote glyph: shadow, pulsing outline, image
+//   2 wordmark — measured-centered text in a loaded face
+//   3 caption — measured-centered small system-face text
+
+~import libs/metal
+
+// The remote glyph — the surface's input grammar made visible.
+// `tex` is an image.load handle of the remote PNG; `glow` drives the
+// champagne outline's flash. Centered at (cx, cy), `h` scales it.
+~pub tor remote { f: *libs/metal:Frame<frame>, tex: i64, cx: f64, cy: f64, h: f64, glow: f64 }
+
+~remote = libs/metal:draw.shadow(f, x: cx - h * 0.1588 + 6.0, y: cy - h / 2.0 + 12.0, w: h * 0.3176, h, radius: 22.0, blur: 16.0, r: 0.10, g: 0.08, b: 0.05, a: 0.5)
+    |> libs/metal:draw.imagetint(f, tex, x: cx - h * 0.1588 - 4.0, y: cy - h / 2.0 - 4.0, w: h * 0.3176 + 8.0, h: h + 8.0, r: 0.95, g: 0.85, b: 0.4, a: glow)
+    |> libs/metal:draw.image(f, tex, x: cx - h * 0.1588, y: cy - h / 2.0, w: h * 0.3176, h)
+
+// A wordmark measures itself — `mark` bookkeeping is the caller's no longer.
+~pub tor wordmark {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    face: i64, text: string, size: f64, cx: f64, y: f64,
+    r: f64, g: f64, b: f64, a: f64,
+}
+
+~wordmark = libs/metal:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
+    |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y, size, font: face, r, g, b, a, text)
+
+// A small centered caption in the system face — the ink-on-silk voice.
+~pub tor caption {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    text: string, cx: f64, y: f64, a: f64,
+}
+
+~caption = libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : cw
+    |> libs/metal:draw.text(f, x: cx - cw / 2.0, y, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a, text)

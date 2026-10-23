@@ -1,0 +1,8 @@
+{
+  "name": "@korulang/components",
+  "version": "0.0.1",
+  "description": "OMNI's element vocabulary above libs/metal — named draw chains dispatched by kind",
+  "paths": {
+    "libs": ".."
+  }
+}
