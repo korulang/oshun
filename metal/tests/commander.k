@@ -26,7 +26,7 @@ import std/io
 import app/omni_img
 import libs/components
 
-std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64] }
+std/store:new(world) { frame: 0[i64], caret: 0[i64], face: 0[i64], drift: 1[i64], remote: 0[i64], hi: 0[i64], cmdv: 0[i64], hubv: 0[i64] }
 
 // The solved view — the rects clay hands back each frame. Stores take one
 // scalar type per table, so the f64 geometry lives in its own store.
@@ -115,9 +115,10 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                 |> if (rc.ud == 3)
                                                     | then |> std/store:stored { view.planex: rc.x, view.planey: rc.y, view.planew: rc.w, view.planeh: rc.h }
                                             | drained |> _
-                                    // The bridge's presence — the gravitational center the
-                                    // custody pool's cards orbit. Drawn under the boot layer.
-                                    |> libs/components:hub(win: w, f, text: "omni", cx: view.planex + view.planew / 2.0, cy: view.planey + view.planeh * 0.48, r: view.planeh * 0.10, glow: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
+                                    // The bridge's presence — hidden until the boot layer is
+                                    // dismissed, so it never crowds the remote on open.
+                                    |> if (world.hubv == 1)
+                                        | then |> libs/components:hub(win: w, f, text: "omni", cx: view.planex + view.planew / 2.0, cy: view.planey + view.planeh * 0.48, r: view.planeh * 0.10, glow: 0.12 + 0.6 * if (world.frame % 140 < 70) @as(f64, @floatFromInt(world.frame % 140)) / 70.0 else @as(f64, @floatFromInt(140 - world.frame % 140)) / 70.0)
                                     // Element lifecycle — a row past its ttl dies; keypress kills too.
                                     |> std/store:query(el)
                                         ! query e
@@ -180,12 +181,13 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                                     |> app/omni_img:res-id(r.slot) : hid
                                                         |> if (r.alive == 1)
                                                             | then |> libs/metal:draw.text(f, x: r.rx + 6.0 * r.s, y: r.ry + r.rh + 4.0, size: 11.0, r: 0.16, g: 0.12, b: 0.08, a: (1.0 - 0.5 * r.t) * 0.8, text: hid)
-                                    // The commander strip — the wire grammar, typed by hand.
-                                    |> libs/metal:draw.rect(f, x: view.stripx, y: view.stripy, w: view.stripw, h: view.striph, r: 0.16, g: 0.12, b: 0.08, a: 0.92)
-                                    |> libs/metal:draw.text(f, x: view.stripx + 30.0, y: view.stripy + 22.0, size: 20.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, text: "> ")
-                                    |> libs/metal:text.offset(win: w, text: "> ", size: 20.0, face: 0, index: 2) : px
-                                        |> libs/metal:draw.text(f, x: view.stripx + 30.0 + px, y: view.stripy + 22.0, size: 20.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, text: txt.data)
-                                        |> libs/metal:text.offset(win: w, text: txt.data, size: 20.0, face: 0, index: world.caret) : cx
+                                    // The commander strip — hidden at boot; Tab reveals and toggles it.
+                                    |> if (world.cmdv == 1)
+                                        | then |> libs/metal:draw.rect(f, x: view.stripx, y: view.stripy, w: view.stripw, h: view.striph, r: 0.16, g: 0.12, b: 0.08, a: 0.92)
+                                            |> libs/metal:draw.text(f, x: view.stripx + 30.0, y: view.stripy + 22.0, size: 20.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, text: "> ")
+                                            |> libs/metal:text.offset(win: w, text: "> ", size: 20.0, face: 0, index: 2) : px
+                                            |> libs/metal:draw.text(f, x: view.stripx + 30.0 + px, y: view.stripy + 22.0, size: 20.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, text: txt.data)
+                                            |> libs/metal:text.offset(win: w, text: txt.data, size: 20.0, face: 0, index: world.caret) : cx
                                             |> libs/metal:draw.rect(f, x: view.stripx + 30.0 + px + cx, y: view.stripy + 24.0, w: 1.5, h: 24.0, r: 0.95, g: 0.85, b: 0.4, a: 1.0)
                                             |> libs/metal:draw.text(f, x: view.stripx + view.stripw - 380.0, y: view.stripy + 28.0, size: 12.0, r: 0.91, g: 0.85, b: 0.72, a: 0.6, text: status.data)
                                     |> if (world.frame == 60)
@@ -284,6 +286,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                         ! query e
                                             |> if (e.alive == 1)
                                                 | then |> std/store:stored { e.alive: 0 }
+                                    |> std/store:stored { world.hubv: 1, world.cmdv: if (world.cmdv == 0) 1 else 0 }
                                 ! key-down k when k.code == 2
                                     |> std/store:stored { world.drift: if (world.drift == 0) 1 else 0 }
                                 ! key-down k when k.code == 53 |> libs/host:quit()
