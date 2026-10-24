@@ -61,7 +61,7 @@ libs/metal:window.open(width: 960, height: 620, title: "omni — drift feel, esc
                 |> if (world.frame == 170)
                     | then |> std/store:stored { res[world.pc].actor: 1, res[world.pc].touched: world.frame }
                 // The room: champagne silk wall-to-wall, no authored chrome.
-                |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 960.0, h: 620.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 960.0, h: 620.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                 |> if (world.face > 0)
                     | then |> libs/metal:draw.textface(f, mark.x, y: 22.0, size: 26.0, font: world.face, r: 0.16, g: 0.12, b: 0.08, a: 0.55, text: "omni")
                 // Fog line — the vanishing shelf documents drift toward, revealed
@@ -77,7 +77,7 @@ libs/metal:window.open(width: 960, height: 620, title: "omni — drift feel, esc
                         // The document: silk tile whose pearl fringe RISES with
                         // depth — spectral is what discharged looks like — while
                         // alpha falls toward the fog.
-                        |> libs/metal:draw.silk(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.78 * r.t), angle: 0.25 + @as(f64, @floatFromInt(r.id)) * 0.4, folds: 2.0, sheen: 1.0, pearl: 0.4 + 0.6 * r.t)
+                        |> libs/metal:draw.roundrect(f, x: r.rx, y: r.ry, w: r.rw, h: r.rh, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.78 * r.t))
                         // Title rule — the document reading, a single dark line.
                         |> libs/metal:draw.rect(f, x: r.rx + 12.0 * r.s, y: r.ry + 14.0 * r.s, w: r.rw * 0.55, h: 3.0, r: 0.16, g: 0.12, b: 0.08, a: @as(f64, @floatFromInt(r.alive)) * (1.0 - 0.78 * r.t) * 0.7)
                         // Agent-acted: the violet rule under the tile.

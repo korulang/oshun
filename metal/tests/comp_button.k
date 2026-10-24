@@ -29,7 +29,7 @@ libs/metal:window.open(width: 800, height: 400, title: "component — button")
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             // the room — champagne silk, same drape as the commander's
-            |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 800.0, h: 400.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+            |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 800.0, h: 400.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
             // the component row — each tor owns its own box and states
             |> libs/components:button(win: w, f, text: "engage",  size: 15.0, face: 0, x: 90.0,  y: 182.0, variant: 1, fworld.mx, fworld.my, world.down, disabled: 0)
             |> libs/components:button(win: w, f, text: "hold",    size: 15.0, face: 0, x: 280.0, y: 182.0, variant: 0, fworld.mx, fworld.my, world.down, disabled: 0)

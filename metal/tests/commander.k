@@ -97,7 +97,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                                         | drained |> _
                                     |> libs/metal:window.size(win: w) : sz
                                     // The room.
-                                    |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, sz.w, sz.h, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                                    |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, sz.w, sz.h, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                                     // The chrome is solved: a dock tree — wordmark band top,
                                     // commander strip bottom, custody plane fill — and the
                                     // commands it hands back are the rects everything reads.

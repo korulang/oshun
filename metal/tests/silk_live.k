@@ -23,9 +23,9 @@ libs/metal:window.open(width: 640, height: 430, title: "omni silk — animated")
         |> libs/metal:frames(win: w, count: 9999)
             ! frame f
                 |> std/store:stored { world.frame: world.frame + 1 }
-                |> libs/metal:draw.silk(f, x: 60.0,  y: 50.0,  w: 240.0, h: 150.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.7, folds: 3.0, sheen: 1.0, pearl: 0.6)
-                |> libs/metal:draw.silk(f, x: 340.0, y: 50.0,  w: 240.0, h: 150.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.7, folds: 3.0, sheen: 1.0, pearl: 0.6)
-                |> libs/metal:draw.silk(f, x: 60.0,  y: 230.0, w: 520.0, h: 160.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.3, folds: 2.0, sheen: 1.0, pearl: 0.6)
+                |> libs/metal:draw.roundrect(f, x: 60.0,  y: 50.0,  w: 240.0, h: 150.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
+                |> libs/metal:draw.roundrect(f, x: 340.0, y: 50.0,  w: 240.0, h: 150.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
+                |> libs/metal:draw.roundrect(f, x: 60.0,  y: 230.0, w: 520.0, h: 160.0, radius: 14.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                 |> if (world.face > 0)
                     | then |> libs/metal:draw.textface(f, mark.x, y: 272.0, size: 72.0, font: world.face, r: 0.16, g: 0.12, b: 0.08, a: 0.70, text: "omni")
                 |> if (world.frame == 30)

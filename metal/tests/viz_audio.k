@@ -51,7 +51,7 @@ std/store:new(world) { frame: 0[i64] }
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1 }
                     // the room — champagne silk, same drape as the commander's
-                    |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 1180.0, h: 420.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                    |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 1180.0, h: 420.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                     // card 0 — slot 0: mic session 1
                     |> libs/metal:draw.panel(f, x: 60.0, y: 120.0, w: 240.0, h: 170.0, radius: 12.0, r: 0.97, g: 0.95, b: 0.89, a: 0.92, bw: 1.0, br: 0.80, bg: 0.70, bb: 0.55, ba: 0.5)
                     |> if (k0p == 2)

@@ -38,10 +38,10 @@ app/omni_img:file-open(path: "/Users/larsde/src/oshun/metal/tests/silk_live.k")
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1 }
                     // the room — the champagne silk drape the commander stands on
-                    |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 920.0, h: 560.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                    |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 920.0, h: 560.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                     // a pearl halo where the card lands — its fringe reads
                     // around the card's edges
-                    |> libs/metal:draw.silk(f, x: 60.0, y: 20.0, w: 800.0, h: 500.0, radius: 240.0, r: 0.97, g: 0.93, b: 0.82, a: 0.30, angle: 0.35, folds: 2.0, sheen: 0.8, pearl: 0.9)
+                    |> libs/metal:draw.roundrect(f, x: 60.0, y: 20.0, w: 800.0, h: 500.0, radius: 240.0, r: 0.97, g: 0.93, b: 0.82, a: 0.30)
                     // the component — t and scroll driven by the frame count
                     |> libs/components/code_codeview:code-ease(t: @as(f64, @floatFromInt(world.frame)) / 40.0) : sc
                     |> libs/components/code_codeview:codeview(f, world.slot, face: world.fnt, x: 130.0, y: 60.0, w: 660.0, h: 420.0,

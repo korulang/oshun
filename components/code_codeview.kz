@@ -222,7 +222,7 @@ fn codeIsPunct(c: u8) bool {
     // floor shadow — the card floats over the room's silk
     |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
     // ink body — the dark silk pane the material puts code on
-    |> libs/metal:draw.silk(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * e, angle: 0.35, folds: 2.0, sheen: 0.4, pearl: 0.3)
+    |> libs/metal:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * e)
     // champagne hairline around the body
     |> libs/metal:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
     // header — the file's own basename left, its line count right

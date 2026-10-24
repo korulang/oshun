@@ -34,9 +34,9 @@ std/fs:write-file(path: "/tmp/code_diffview_sample.diff", content: "diff --git a
                         ! frame f
                             |> std/store:stored { world.frame: world.frame + 1 }
                             // the room — the champagne silk drape
-                            |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 1080.0, h: 700.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                            |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 1080.0, h: 700.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                             // a pearl halo where the card lands
-                            |> libs/metal:draw.silk(f, x: 200.0, y: 130.0, w: 680.0, h: 460.0, radius: 210.0, r: 0.97, g: 0.93, b: 0.82, a: 0.35, angle: 0.35, folds: 2.0, sheen: 0.8, pearl: 0.9)
+                            |> libs/metal:draw.roundrect(f, x: 200.0, y: 130.0, w: 680.0, h: 460.0, radius: 210.0, r: 0.97, g: 0.93, b: 0.82, a: 0.35)
                             // the component — the diff drifts up 6 lines
                             // as the card eases, hunks stagger in behind
                             |> libs/components/code_diffview:diff-ease(u: @max(0.0, @min(1.0, @as(f64, @floatFromInt(world.frame)) / 30.0 * 1.4))) : sc

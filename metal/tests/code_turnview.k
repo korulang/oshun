@@ -29,7 +29,7 @@ libs/metal:offscreen.open(width: 720, height: 600, scale: 2.0)
                  ! frame f
                      |> std/store:stored { world.frame: world.frame + 1 }
                      // the room — champagne silk drape, the commander's bed
-                     |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                     |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                      // the surface's own header — the session this is
                      |> libs/metal:draw.text(f, x: 48.0, y: 30.0, size: 14.0, r: 0.16, g: 0.12, b: 0.08, a: 0.75, text: "omni remote mic — session replay")
                      |> libs/metal:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four real turns · /tmp/omni_remote_mic_*.gate.json")
@@ -44,7 +44,7 @@ libs/metal:offscreen.open(width: 720, height: 600, scale: 2.0)
              ! each _ |> libs/metal:offscreen.frame(s)
                  ! frame f
                      |> std/store:stored { world.frame: world.frame + 1 }
-                     |> libs/metal:draw.silk(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.35, folds: 3.0, sheen: 0.7, pearl: 0.45)
+                     |> libs/metal:draw.roundrect(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                      |> libs/metal:draw.text(f, x: 48.0, y: 30.0, size: 14.0, r: 0.16, g: 0.12, b: 0.08, a: 0.75, text: "omni remote mic — session replay")
                      |> libs/metal:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four real turns · /tmp/omni_remote_mic_*.gate.json")
                      |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_33.gate.json", face: world.fnt, x: 48.0, y: 72.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 0.0, a: 1.0)

@@ -291,7 +291,7 @@ oshun:component(seed, spec) {
                     |> std/store:query(entries)
                         ! query { [row]se, [id]sid } when sid == world.sel
                             |> libs/metal:draw.shadow(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 34.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, blur: 22.0, r: 0.30, g: 0.22, b: 0.10, a: 0.35)
-                            |> libs/metal:draw.silk(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.94, g: 0.89, b: 0.78, a: 0.97, angle: 0.35, folds: 2.0, sheen: 0.7, pearl: 0.65)
+                            |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.94, g: 0.89, b: 0.78, a: 0.97)
                             |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 40.0, size: 13.0, r: 0.42, g: 0.34, b: 0.20, a: 0.9, text: se.sub)
                             |> if (se.tork == 0)
                                 | then |> libs/components:hub(win: w, f, text: "bridge", cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0 - 10.0, r: 64.0, glow: 0.75)

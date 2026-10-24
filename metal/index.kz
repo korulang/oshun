@@ -167,10 +167,11 @@ const msl_src: [:0]const u8 =
     \\// with optional border (kind 0), an atlas glyph (kind 1 — R8 coverage
     \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), an
     \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color),
-    \\// a champagne-silk panel (kind 4 — pearlescent drape field), a
-    \\// liquid-glass pane (kind 5 — bezel-lens refraction of the
+    \\// a liquid-glass pane (kind 5 — bezel-lens refraction of the
     \\// image-atlas backdrop beneath it), or a frosted-glass pane
     \\// (kind 6 — ground-glass scatter of the captured scene texture).
+    \\// (Kind 4, the pearlescent silk drape, was retired — its hue
+    \\// fringe banded on flat panels; flat fills carry the champagne.)
     \\// Each instance clips to its clip rect; clip corners may be rounded.
     \\struct Inst {
     \\    float4 rect;          // x, y, w, h in points
@@ -183,9 +184,7 @@ const msl_src: [:0]const u8 =
     \\    float border_width;   // blur sigma for kind 2
     \\    float kind;
     \\    float clip_round;     // corners * 4096 + radius, 0 = square clip
-    \\    float4 silk;          // kind 4: fold angle (rad), folds across the
-    \\                          // short side, sheen strength, pearl fringe.
-    \\                          // kind 5: bezel width, refract depth (both in
+    \\    float4 silk;          // kind 5: bezel width, refract depth (both in
     \\                          // points), rim-light width, aberration frac
     \\                          // kind 6: scatter radius, rim-chamfer width
     \\                          // (both in points), grain sparkle, milk density
@@ -249,42 +248,10 @@ const msl_src: [:0]const u8 =
     \\    float2 q = abs(p) - half_size + r;
     \\    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
     \\}
-    \\// Cosine palette for the pearl fringe — warm center, pale rose/mint
-    \\// at the ends. Kept subtle: charmeuse is satin, not soap bubble.
-    \\static float3 silk_pal(float t) {
-    \\    return 0.5 + 0.5 * cos(6.28318 * (t + float3(0.0, 0.33, 0.67)));
-    \\}
-    \\// Hash value noise — the large displacement layer. Two octaves at
-    \\// ~tile scale warp the fold coordinates, and a third masks fold
-    \\// strength per region, so a drape bunches, bends, and goes flat
-    \\// between fold clusters instead of repeating a uniform wave.
+    \\// Hash value noise — the frost pane's grain layer uses the same
+    \\// deterministic hash for its drifting micro-facet twinkle.
     \\static float silk_hash(float2 p) {
     \\    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
-    \\}
-    \\static float silk_vnoise(float2 p) {
-    \\    float2 ip = floor(p), fp = fract(p);
-    \\    float2 s = fp * fp * (3.0 - 2.0 * fp);
-    \\    return mix(mix(silk_hash(ip), silk_hash(ip + float2(1.0, 0.0)), s.x),
-    \\               mix(silk_hash(ip + float2(0.0, 1.0)), silk_hash(ip + float2(1.0, 1.0)), s.x), s.y);
-    \\}
-    \\// Drape height at a local point. mn is the tile's short side, k the
-    \\// fold wave number, ph the per-tile phase, fu/fv fold axes, tm the
-    \\// frame clock — the warp field crawls and the wobble phases breathe
-    \\// so the drape stirs rather than slides, each tile at its own rate.
-    \\static float silk_field(float2 lp, float mn, float k, float ph, float2 fu, float2 fv, float tm) {
-    \\    float tm2 = tm * (0.7 + 0.6 * fract(ph * 0.618));
-    \\    float u = dot(lp, fu), v = dot(lp, fv);
-    \\    float wq = silk_vnoise(lp * (2.4 / mn) + ph * 0.73 + float2(tm2 * 0.18, -tm2 * 0.13)) - 0.5;
-    \\    float wr = silk_vnoise(lp * (4.7 / mn) + ph * 1.31 + 40.0 + tm2 * 0.14) - 0.5;
-    \\    v += (wq * 2.2 + wr * 0.9) / max(k, 0.05);
-    \\    u += wr * 1.2 / max(k, 0.05);
-    \\    float am = 0.55 + 0.9 * silk_vnoise(lp * (1.1 / mn) + ph * 2.1 + 80.0 + tm2 * 0.08);
-    \\    float w1 = u * k * 0.19 + ph * 1.7 + tm2 * 1.0;
-    \\    float w2 = u * k * 0.07 + ph + tm2 * 0.42;
-    \\    float w3 = u * k * 0.35 - v * k * 0.20 + ph * 0.7 + tm2 * 0.25;
-    \\    float t1 = v * k + 1.4 * sin(w1) + ph;
-    \\    float t2 = v * k * 2.31 + 1.6 * sin(w2) + ph * 2.3;
-    \\    return (0.55 * sin(t1) + 0.22 * sin(t2)) * am + 0.60 * sin(w3);
     \\}
     \\// Liquid glass — bezel-lens optics ported from nanoui's glass.metal
     \\// (MIT, github.com/justrach/nanoui), the documented sibling of silk.
@@ -357,50 +324,6 @@ const msl_src: [:0]const u8 =
     \\        // SourceAlpha/1-SourceAlpha, so straighten before tinting.
     \\        c.rgb /= max(c.a, 1e-5);
     \\        return c * i.color * clip_cover;
-    \\    }
-    \\    if (i.kind == 4.0) {
-    \\        // Champagne silk — a synthesized drape field tilts a
-    \\        // pseudo-normal across the quad. Folds run along silk.x and
-    \\        // take their phase from rect position so no two tiles agree;
-    \\        // a tile-scale noise warp displaces the fold coordinates so
-    \\        // the drape bunches and bends like fabric instead of waves.
-    \\        // Shading: wrap diffuse, a Kajiya-Kay sheen lobe stretched
-    \\        // along the fold tangent, a tight glint, and a thin-film hue
-    \\        // fringe (pearl) where the surface leans away from the view.
-    \\        float2 fu = float2(cos(i.silk.x), sin(i.silk.x));
-    \\        float2 fv = float2(-fu.y, fu.x);
-    \\        float mn = min(i.rect.z, i.rect.w);
-    \\        float ph = fract(sin(dot(i.rect.xy, float2(12.9898, 78.233))) * 43758.5453) * 6.28318;
-    \\        float k = 6.28318 * i.silk.y / mn;
-    \\        float h = silk_field(in.local, mn, k, ph, fu, fv, ftime);
-    \\        float dvn = (silk_field(in.local + fv, mn, k, ph, fu, fv, ftime)
-    \\                  - silk_field(in.local - fv, mn, k, ph, fu, fv, ftime)) * 0.5;
-    \\        float dun = (silk_field(in.local + fu, mn, k, ph, fu, fv, ftime)
-    \\                  - silk_field(in.local - fu, mn, k, ph, fu, fv, ftime)) * 0.5;
-    \\        float2 g = dun * fu + dvn * fv;
-    \\        float3 n = normalize(float3(-g * 4.5, 1.0));
-    \\        float3 L = normalize(float3(-0.58, -0.60, 0.55));
-    \\        float3 Hv = normalize(L + float3(0.0, 0.0, 1.0));
-    \\        float ndl = dot(n, L);
-    \\        float shade = clamp(0.55 + 0.62 * ndl, 0.28, 1.30);
-    \\        float3 col = i.color.rgb * shade * (1.0 + 0.14 * h);
-    \\        // The sheen is genuinely anisotropic: the fold tangent tilts
-    \\        // with the along-fold slope, so T·H varies across the drape
-    \\        // and the highlight settles into bands along the folds.
-    \\        float3 T = normalize(float3(fu, dun * 4.5));
-    \\        float th = dot(T, Hv);
-    \\        float sheen = i.silk.z * pow(sqrt(max(0.0, 1.0 - th * th)), 16.0)
-    \\                    * smoothstep(-0.15, 0.55, ndl);
-    \\        float glint = pow(max(dot(n, Hv), 0.0), 110.0) * i.silk.z;
-    \\        float gr = 1.0 - n.z;
-    \\        float3 spec_col = mix(float3(1.0, 0.96, 0.88), silk_pal(h * 0.35 + gr * 4.0),
-    \\                              clamp(i.silk.w * gr * 3.5, 0.0, 0.50));
-    \\        float rim = pow(gr, 2.0) * i.silk.w * 0.30;
-    \\        col += spec_col * (sheen * 0.26 + glint * 0.42)
-    \\             + silk_pal(gr * 4.0 + ph * 0.11) * rim;
-    \\        float saa = max(fwidth(d), 0.0001) * 0.5;
-    \\        float scov = 1.0 - smoothstep(-saa, saa, d);
-    \\        return float4(col, i.color.a * scov) * clip_cover;
     \\    }
     \\    if (i.kind == 5.0) {
     \\        // Liquid glass — the pane refracts the image-atlas backdrop
@@ -556,7 +479,6 @@ const inst_quad: f32 = 0;
 const inst_text: f32 = 1;
 const inst_shadow: f32 = 2;
 const inst_image: f32 = 3;
-const inst_silk: f32 = 4;
 const inst_glass: f32 = 5;
 const inst_frost: f32 = 6;
 
@@ -2333,28 +2255,6 @@ pub const Surface = struct {
         .kind = inst_shadow,
         .clip_round = 0,
         .silk = .{ 0, 0, 0, 0 },
-    });
-}
-
-// Champagne silk — the pearlescent material. r,g,b,a is the base fabric
-// color (champagne ~0.91,0.85,0.72); `angle` aims the folds in radians,
-// `folds` counts waves across the short side (0 = a flat pearl panel),
-// `sheen` scales the satin highlight, `pearl` the thin-film fringe on
-// tilted flanks. Fold phase derives from position — no two tiles agree.
-~pub tor draw.silk { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, r: f64, g: f64, b: f64, a: f64, angle: f64, folds: f64, sheen: f64, pearl: f64 }
-
-~proc draw.silk|zig {
-    instPush(f, .{
-        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
-        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
-        .border_color = .{ 0, 0, 0, 0 },
-        .uv = .{ 0, 0, 0, 0 },
-        .clip = curClip(f),
-        .radius = @floatCast(radius),
-        .border_width = 0,
-        .kind = inst_silk,
-        .clip_round = 0,
-        .silk = .{ @floatCast(angle), @floatCast(folds), @floatCast(sheen), @floatCast(pearl) },
     });
 }
 

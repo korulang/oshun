@@ -23,10 +23,10 @@ libs/metal:window.open(width: 920, height: 660, title: "omni frost — ground gl
                 |> std/store:stored { world.frame: world.frame + 1 }
                 // ===== the scene — everything the panes will frost =====
                 // silk tiles behind row 1 — living drape, visibly smeared
-                |> libs/metal:draw.silk(f, x: 20.0,  y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0, angle: 0.5,  folds: 7.0, sheen: 0.9, pearl: 0.6)
-                |> libs/metal:draw.silk(f, x: 240.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.72, g: 0.80, b: 0.92, a: 1.0, angle: -0.4, folds: 9.0, sheen: 1.0, pearl: 0.8)
-                |> libs/metal:draw.silk(f, x: 460.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.90, g: 0.62, b: 0.55, a: 1.0, angle: 1.1,  folds: 6.0, sheen: 0.8, pearl: 0.5)
-                |> libs/metal:draw.silk(f, x: 680.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.62, g: 0.72, b: 0.60, a: 1.0, angle: -0.9, folds: 11.0, sheen: 1.0, pearl: 0.9)
+                |> libs/metal:draw.roundrect(f, x: 20.0,  y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
+                |> libs/metal:draw.roundrect(f, x: 240.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.72, g: 0.80, b: 0.92, a: 1.0)
+                |> libs/metal:draw.roundrect(f, x: 460.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.90, g: 0.62, b: 0.55, a: 1.0)
+                |> libs/metal:draw.roundrect(f, x: 680.0, y: 30.0, w: 210.0, h: 175.0, radius: 10.0, r: 0.62, g: 0.72, b: 0.60, a: 1.0)
                 // text band behind row 2 — readable until the frost eats it
                 |> libs/metal:draw.text(f, x: 44.0,  y: 262.0, size: 28.0, r: 1.0,  g: 0.95, b: 0.80, a: 1.0, text: "frosted glass — the scene beneath is real")
                 |> libs/metal:draw.text(f, x: 44.0,  y: 300.0, size: 15.0, r: 0.75, g: 0.85, b: 1.0,  a: 1.0, text: "silk + text + panels + stripes, captured mid-frame, then scattered")
