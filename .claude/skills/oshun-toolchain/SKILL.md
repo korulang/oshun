@@ -39,6 +39,10 @@ UI subtree (metal/clay/ui/solver) is inbound from koru-libs.
 
 ## What bites
 
+- **commander.k exceeds the default compile-memory budget** — compiling
+  `metal/tests/commander.k` (the OMNI bridge app) needs
+  `KORU_COMPILE_MEM_MB=8192`; the 4096MB default dies mid-pipeline
+  (verified against HEAD, first hit by the visualizer-02 replay).
 - **A compile is not a verification** — markup lowers to store seeds;
   wrong seeds compile fine. Check the seeded rows/pixels.
 - The transform emits `std.store` inserts — markup-only consumers pull
