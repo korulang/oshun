@@ -73,38 +73,99 @@ grammar.
   apps draw zero frames; every fast path must pixel-match its slow path
   (shaper, raster↔Metal, GL↔CPU).
 
+## nanoterm — the ACP reference implementation (deep read)
+
+`apps/nanoterm` (submodule → `github.com/justrach/nanoterm`): a Warp-like
+terminal where agent sessions are first-class. The pieces that matter:
+
+- **`acp.zig` (176 lines)** — the whole protocol: JSON-RPC 2.0 over
+  ndjson stdio, pending-callback map, `request/notify/respond/
+  respondError`. No SDK, pure Zig + `std.json`.
+- **`agents.zig`** — dispatch table (graff, claude, codex, opencode,
+  grok, **devin**, hermes) with installers + `searchPath()`: appends
+  `~/.local/bin`, `~/.harness/bin`, etc. when spawning — the launchd
+  PATH hole we patched by hand is already solved machinery here.
+- **`agent.zig` — the turn model.** `Turn{prompt, items, sent, done}`
+  where `Item = union{ text, thought, tool{kind,status,detail,block},
+  plan[], permission{rpc_id, options[], chosen}, command→pty block,
+  note, visual }`. Two items map straight onto OMNI law:
+  - `permission` — an agent request parked in the turn until answered;
+    `answer(p, index)` discharges the rpc. That IS our center-click
+    approval surface, already modeled.
+  - `visual` (`showVisual(title, script)`) — an agent pushes a *live
+    visual* into its own turn. Their escape hatch is our normal case:
+    the agent minting a resource on the plane.
+- **`session.zig`** — `Entry = union{ block: pty-block, turn: Turn }`:
+  a session interleaves shell blocks and agent turns;
+  `Mode{terminal, agent}` toggles per session.
+- **Views decomposed per concern**: view_turn, view_sidebar (session
+  list), view_palette, view_pane, view_signins, view_settings — a
+  worked example of session-UI layout without a browser.
+- `mcp_server.zig` (150 lines) — they also *host* MCP for the agents.
+
+## Already built — where the custody plane is ahead
+
+The gap list is shorter than a raw vocabulary diff suggests. From
+`metal/index.kz` + `components/index.kz` + `commander.k`:
+
+- **Materials exist**: `draw.silk` (champagne/pearlescent — the founding
+  shader), `draw.glass` (backdrop texture + bezel/refract/rim/aberration
+  — nanoui's `Material` shape, already parameterized), `draw.frost`
+  (rough/edge/grain/milk), `draw.panel`, `draw.shadow`, `draw.roundrect`,
+  `draw.clip.push/pop`. The material challenge builds ON this, not
+  toward it.
+- **Components exist**: `remote`, `wordmark`, `caption`, `hub`,
+  `button`, `waveform` (kind-2, real WAV bytes), `docpage` (kind-0,
+  real file bytes) — the visualizer catalog's two entries.
+- **Input exists**: key/type/mouse/move/up/drag/scroll + `RemoteData`
+  (Siri Remote buttons as events — neither toolkit has this).
+- **Headless verification exists**: `offscreen` surfaces + `snap` —
+  nanoui's `--nanoui-snapshot` doctrine, already ours.
+- **Text exists**: `draw.text` + `text.offset` measurement; the
+  transcript seam re-reads `.txt` sidecars per frame — live-updating
+  documents for free (what nanoui needs a widget for, we get from the
+  file+re-read rule).
+- **The custody plane itself** — neither toolkit has it: resources,
+  kinds, minted-by-bridge, drift. Their `Item.visual` escape hatch is
+  our front door.
+
 ## Compiled triage — what the custody plane wants, ranked
 
 **P0 — the ACP/session vertical needs these now:**
 
-1. **markdown.Stream + Reveal** (mygo) — session replies stream as
-   chunks; kind-3 session card wants incremental markdown, not raw
-   appends.
-2. **editor + DiffView** (mygo) — reading what an agent produced is
-   the work-through-OMNI core loop.
-3. **Overlay family** (both) — popover/alert/sheet = the permission
-   surface for fs/terminal caps; center-click discharges.
-4. **Collection widgets** (both) — list/tree/sidebar/outline: resource
+1. **nanoterm's Turn/Item model** — `Item = union{text, thought, tool,
+   plan, permission, command, note, visual}` is the schema our
+   `omni_session_<name>.txt` append-loop should adopt instead of
+   flat `you:`/`devin:` lines; `permission{rpc_id, options}` parked in
+   a turn is exactly the center-click discharge surface.
+2. **`acp.zig` (176 lines, pure Zig)** — the protocol port's reference:
+   JSON-RPC over ndjson, pending callbacks, `searchPath()` for agent
+   discovery. When the Python scaffold moves to Koru this file is the
+   shape.
+3. **markdown.Stream + Reveal** (mygo) — session replies stream as
+   chunks; a session card wants incremental markdown, not raw appends.
+4. **Overlay family** (both) — popover/alert/sheet: the permission
+   prompt's visual form.
+5. **Collection widgets** (both) — list/tree/sidebar/outline: resource
    pool + session registry as navigable collections; nanoui's
    virtualized `list` is the cheap version, mygo's Tree the richer.
-5. **nanoterm's ACP shape** — someone already built "agent sessions in
-   a native UI" on this stack; worth reading how they seat agents in
-   views (submodule, needs a real clone).
 
 **P1 — near-term kinds and materials:**
 
-6. **Liquid Glass material** (nanoui) — the `Material` struct IS our
-   material challenge's data shape; bezel/refraction/rim/tint params
-   map onto champagne/pearlescent directly, and the Metal+CPU
-   pixel-parity pattern is how to test a material honestly.
+6. **editor + DiffView** (mygo) — reading what an agent produced;
+   lands once session turns carry tool calls with detail.
 7. **chart grammar** (mygo) — marks+scales for drift/staleness depth
    and session telemetry as a kind.
 8. **motion vocabulary** (nanoui) — springs/keyframes/layout animation:
    card mint/dismiss/focus transitions as a named system, not one-offs.
 9. **Toast** (both) — custody events (minted/discharged/wire results)
    as ambient notices.
-10. **terminal pattern** (mygo plugin; nanoterm is the lived version) —
-    a pty surface as a card kind for an agent's terminal cap.
+10. **pty block as a card kind** — nanoterm's `command→blocks.Block`
+    (a live terminal in a turn) mapped to a minted resource kind for an
+    agent's terminal cap.
+11. **CPU-twin pixel parity** (nanoui `raster.zig` ↔ Metal) — the honest
+    pattern for testing `draw.silk`/`draw.glass`/`draw.frost`
+    headlessly; a material-challenge testing discipline, not a widget.
 
 **P2 — generic chrome (component-challenge fodder):** text inputs &
 IME field, select/combobox/autocomplete, sliders/steppers/number,
