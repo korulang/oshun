@@ -1,0 +1,222 @@
+// code_turnview — an agent-turn renderer.
+//
+// One call draws ONE turn card: the session sidecar at `path` is re-read
+// every frame (the res-transcript seam's rule — a verdict can land after
+// the card mounts, and a stale read would never see it) and decoded as
+// the remote-mic gate's real shape:
+//
+//   { "text": <utterance>, "verdict": {"type": "acp|no-match|empty",
+//     "reply": <agent reply, acp only>}, "wire": <issued wire command|""> }
+//
+// …then laid out as nanoterm's Item union (src/agent.zig) renders them —
+// each item kind gets its own row treatment, never a flat paragraph:
+//
+//   prompt — the user's utterance: champagne marker pill + full-ink text
+//   note   — the bridge's verdict line: quiet label on a hairline rule
+//   text   — the agent's reply body: full ink, measured-fit with an
+//            ellipsis when the run outgrows the card
+//   tool   — the issued wire command: status dot + mono kind chip +
+//            mono detail column
+//
+// thought/plan/permission items carry no bytes in this sidecar schema —
+// the kinds drawn are the kinds the file carries. An empty verdict gets
+// a real empty state (the marker, the hairline, the quiet dash), not a
+// blank card.
+//
+//   turnview(f, path: "/tmp/omni_remote_mic_33.gate.json",
+//            face: mono, x, y, w, h, t, a)
+//
+//   f      — the live frame borrow (draw calls hang off it)
+//   path   — the sidecar's path; re-read per frame, never cached
+//   face   — a mono font handle: libs/metal:font.load in a windowed
+//            host, tv-font on a headless surface (the tool row's wire
+//            bytes and the right-edge file tag ride it)
+//   x,y,w,h— the card's box; content clips to it
+//   t      — frames since mount; rows stagger in on a 5-frame cadence,
+//            rising 7pt and fading on a smoothstep settle
+//   a      — master alpha, composed with the stagger
+//
+// Headless companions. metal's text tors (font.load, text.offset) take
+// *Window<opened|active>, which an offscreen Surface cannot mint — so
+// the surface-side callers measure and load through the seam procs
+// below. They ride the frame's OWN TextSystem and metal's font
+// registry: same shaper, same cache, same handles draw.textface
+// consumes — the numbers are the renderer's, never assumed metrics.
+
+~import libs/metal
+~import std/io
+~import std/json
+
+const std = @import("std");
+const M = @import("root").koru_libs.koru_metal;
+
+// font.load's offscreen twin — the window param it takes is ignored by
+// the proc, so the job is identical: CGDataProvider + CGFont appended
+// to metal's registry, the 1-based handle draw.textface consumes back.
+~pub tor tv-font { path: string } | font i64 | err string
+
+~proc tv-font|zig {
+    const pool = M.objc_autoreleasePoolPush();
+    defer M.objc_autoreleasePoolPop(pool);
+    var pbuf: [1024]u8 = undefined;
+    const dp = M.CGDataProviderCreateWithFilename(M.cstr(path, &pbuf)) orelse
+        return .{ .err = "metal: font file not readable" };
+    defer M.cf.CFRelease(dp);
+    const cg = M.CGFontCreateWithDataProvider(dp) orelse
+        return .{ .err = "metal: not a font file" };
+    M.loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("metal: OOM registering font");
+    return .{ .font = @intCast(M.loaded_fonts.items.len) };
+}
+
+// The shaped width of `text` — text.offset's surface-side twin. The
+// frame's TextSystem shapes it, so a label lands where the renderer
+// will put it.
+~[retain]pub tor tv-measure { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64 } -> f64
+
+~proc tv-measure|zig {
+    return @floatCast(f.text.layout(text, face, @floatCast(size)).width);
+}
+
+// The longest prefix of `text` that fits `w` with room for an ellipsis
+// when it must shorten — measured on the shaped layout, cut on a
+// codepoint boundary. Caller compares fit.len to text.len to decide
+// whether the ellipsis glyph follows.
+~[retain]pub tor tv-fit { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64, w: f64 } -> string
+
+~proc tv-fit|zig {
+    const sz: f32 = @floatCast(size);
+    const lay = f.text.layout(text, face, sz);
+    if (lay.width <= w) return text;
+    const ell = f.text.layout("\xE2\x80\xA6", face, sz).width;
+    const limit: f32 = @as(f32, @floatCast(w)) - ell;
+    var units: usize = 0;
+    for (lay.glyphs) |g| {
+        if (g.x + g.adv > limit) break;
+        units = g.str_idx + 1; // str_idx counts UTF-16 units
+    }
+    // Map the UTF-16 unit count back to a UTF-8 byte count — the run
+    // text is UTF-8 bytes and a mid-sequence cut is no cut at all.
+    var bytes: usize = 0;
+    var u: usize = 0;
+    while (bytes < text.len and u < units) {
+        const n = std.unicode.utf8ByteSequenceLength(text[bytes]) catch 1;
+        u += if (n == 4) 2 else 1;
+        bytes += n;
+    }
+    return text[0..bytes];
+}
+
+// The wire command's verb — the span before '(' ("file-open(path: …)"
+// → "file-open"). A command with no arg list yields itself whole.
+~[retain]pub tor tv-kind { wire: string } -> string
+
+~proc tv-kind|zig {
+    const i = std.mem.indexOfScalar(u8, wire, '(') orelse wire.len;
+    return wire[0..i];
+}
+
+// The wire command's detail — the first quoted span ("file-open(path:
+// "/tmp/x.txt")" → "/tmp/x.txt"). A command carrying no quoted argument
+// yields "" — the detail column stays empty rather than invent one.
+~[retain]pub tor tv-detail { wire: string } -> string
+
+~proc tv-detail|zig {
+    const a = std.mem.indexOfScalar(u8, wire, '"') orelse return "";
+    const b = std.mem.indexOfScalarPos(u8, wire, a + 1, '"') orelse return "";
+    return wire[a + 1 .. b];
+}
+
+// The verdict object's field `key` — the raw JSON span's decoded inner
+// text ("type" → "acp", "reply" → the agent's sentence); "" when the
+// field is absent or not a string. The flow emitter drops `type`'s
+// Zig-level @"..." escape outside string interpolation (emission bug),
+// so the verdict fields arrive through the raw span and seam, never a
+// Koru binding named `type`.
+~[retain]pub tor tv-vget { verdict: string, key: string } -> string
+
+~proc tv-vget|zig {
+    const kpat = std.fmt.allocPrint(std.heap.page_allocator, "\"{s}\"", .{key}) catch return "";
+    const ki = std.mem.indexOf(u8, verdict, kpat) orelse return "";
+    var i = ki + kpat.len;
+    while (i < verdict.len and (verdict[i] == ' ' or verdict[i] == ':')) i += 1;
+    if (i >= verdict.len or verdict[i] != '"') return "";
+    const s0 = i + 1;
+    var j = s0;
+    while (j < verdict.len) : (j += 1) {
+        if (verdict[j] == '\\') j += 1 else if (verdict[j] == '"') return verdict[s0..j];
+    }
+    return "";
+}
+
+// 1 when the verdict type is "acp" — the string compare runs in Zig.
+~[retain]pub tor tv-acp { v: string } -> i64
+
+~proc tv-acp|zig {
+    return @intFromBool(std.mem.eql(u8, v, "acp"));
+}
+
+// The path's last segment — the right-edge tag names its file, not its
+// directory.
+~[retain]pub tor tv-tail { path: string } -> string
+
+~proc tv-tail|zig {
+    const i = if (std.mem.lastIndexOfScalar(u8, path, '/')) |ix| ix + 1 else 0;
+    return path[i..];
+}
+
+// The component. One draw chain: floor shadow, pearl card, clip; then
+// the sidecar decode and the kind-dispatched rows. The stagger each row
+// i rides is expanded inline (no mid-chain let): raw phase
+// (t - 3 - 5i) / 15 clamped to [0,1], smoothstepped e = p*p*(3-2p),
+// multiplied into the row's alpha and slid into a 7pt rise. Row slots:
+// prompt i=0, note i=1, reply i=2, tool i=3.
+~pub tor turnview {
+    f: *libs/metal:Frame<frame>,
+    path: string,
+    face: i64,
+    x: f64, y: f64, w: f64, h: f64,
+    t: f64, a: f64,
+}
+
+~turnview = libs/metal:draw.shadow(f, x: x + 4.0, y: y + 8.0, w, h, radius: 14.0, blur: 18.0, r: 0.35, g: 0.27, b: 0.14, a: 0.35 * a * @min(1.0, @max(0.0, t / 15.0)))
+    |> libs/metal:draw.panel(f, x, y, w, h, radius: 14.0, r: 0.98, g: 0.95, b: 0.88, a: 0.92 * a, bw: 1.0, br: 0.55, bg: 0.44, bb: 0.28, ba: 0.5 * a)
+    |> libs/metal:draw.clip.push(f, x, y, w, h)
+    |> std/io:read-file(path)
+    | ok content |> std/json:parse(input: content)
+        | ok _:{ text: string, verdict, wire: string }
+            |> tv-tail(path) : tag
+                |> tv-measure(f, text: tag, size: 9.0, face) : tg
+                |> libs/metal:draw.textface(f, x: x + w - 16.0 - tg, y: y + 14.0, size: 9.0, font: face, r: 0.45, g: 0.38, b: 0.24, a: a * 0.55 * @min(1.0, @max(0.0, t / 15.0)), text: tag)
+            |> libs/metal:draw.roundrect(f, x: x + 16.0, y: y + 20.0 + (1.0 - @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 3.0) / 15.0)))) * 7.0, w: 4.0, h: 10.0, radius: 2.0, r: 0.72, g: 0.58, b: 0.30, a: a * 0.8 * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 3.0) / 15.0))))
+            |> if (text.len > 0)
+                | then |> libs/metal:draw.text(f, x: x + 28.0, y: y + 14.0 + (1.0 - @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 3.0) / 15.0)))) * 7.0, size: 13.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.9 * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * @min(1.0, @max(0.0, (t - 3.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 3.0) / 15.0))), text)
+                | else |> libs/metal:draw.text(f, x: x + 28.0, y: y + 14.0, size: 13.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.3, text: "—")
+            |> libs/metal:draw.rect(f, x: x + 16.0, y: y + 38.0, w: w - 32.0, h: 1.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.08)
+            |> libs/metal:draw.text(f, x: x + 16.0, y: y + 44.0 + (1.0 - @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)))) * 7.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.35 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0))), text: "verdict")
+            |> tv-vget(verdict, key: "type") : vtype
+                |> tv-acp(v: vtype) : isacp
+                |> if (isacp == 1)
+                    | then |> libs/metal:draw.text(f, x: x + 64.0, y: y + 44.0 + (1.0 - @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)))) * 7.0, size: 9.5, r: 0.45, g: 0.35, b: 0.18, a: a * 0.8 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0))), text: vtype)
+                    | else |> libs/metal:draw.text(f, x: x + 64.0, y: y + 44.0 + (1.0 - @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)))) * 7.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.55 * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * @min(1.0, @max(0.0, (t - 8.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 8.0) / 15.0))), text: vtype)
+            |> tv-vget(verdict, key: "reply") : reply
+                |> if (reply.len > 0)
+                    | then |> tv-fit(f, text: reply, size: 12.0, face: 0, w: w - 32.0) : fit
+                        |> libs/metal:draw.text(f, x: x + 16.0, y: y + 62.0 + (1.0 - @min(1.0, @max(0.0, (t - 13.0) / 15.0)) * @min(1.0, @max(0.0, (t - 13.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 13.0) / 15.0)))) * 7.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.82 * @min(1.0, @max(0.0, (t - 13.0) / 15.0)) * @min(1.0, @max(0.0, (t - 13.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 13.0) / 15.0))), text: fit)
+                        |> if (fit.len < reply.len)
+                            | then |> tv-measure(f, text: fit, size: 12.0, face: 0) : fw
+                                |> libs/metal:draw.text(f, x: x + 16.0 + fw, y: y + 62.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.5, text: "…")
+            |> if (wire.len > 0)
+                | then |> libs/metal:draw.roundrect(f, x: x + 16.0, y: y + 89.0 + (1.0 - @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)))) * 7.0, w: 7.0, h: 7.0, radius: 3.5, r: 0.55, g: 0.68, b: 0.28, a: a * 0.9 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0))))
+                    |> tv-kind(wire) : wk
+                        |> libs/metal:draw.textface(f, x: x + 30.0, y: y + 84.0 + (1.0 - @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)))) * 7.0, size: 10.0, font: face, r: 0.45, g: 0.35, b: 0.18, a: a * 0.8 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0))), text: wk)
+                    |> tv-detail(wire) : wd
+                        |> libs/metal:draw.textface(f, x: x + 130.0, y: y + 84.0 + (1.0 - @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)))) * 7.0, size: 10.5, font: face, r: 0.16, g: 0.12, b: 0.08, a: a * 0.6 * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * @min(1.0, @max(0.0, (t - 18.0) / 15.0)) * (3.0 - 2.0 * @min(1.0, @max(0.0, (t - 18.0) / 15.0))), text: wd)
+            |> std/io:free(content)
+            |> libs/metal:draw.clip.pop(f)
+        | malformed _ |> libs/metal:draw.text(f, x: x + 16.0, y: y + 14.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.5, text: "— sidecar unreadable")
+            |> std/io:free(content)
+            |> libs/metal:draw.clip.pop(f)
+    | not-found |> libs/metal:draw.text(f, x: x + 16.0, y: y + 14.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.5, text: "— no sidecar at path")
+        |> libs/metal:draw.clip.pop(f)
+    | failed _ |> libs/metal:draw.text(f, x: x + 16.0, y: y + 14.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.5, text: "— sidecar read failed")
+        |> libs/metal:draw.clip.pop(f)

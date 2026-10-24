@@ -1,0 +1,261 @@
+// codeview — a source file as a surface.
+//
+// What a source file IS, drawn from its own bytes: a minted doc
+// resource's decoded lines (the same app/omni_img seam docpage reads),
+// each line walked into syntax spans by the tokenizer below, set on a
+// measured mono baseline rhythm with a right-aligned line-number
+// gutter, a hairline gutter rule, a scroll offset in line units, and
+// a thumb rail when the file is taller than the view. A resource that
+// decoded zero lines draws its empty state — the component invents no
+// text.
+//
+//   codeview(f, slot: s, face: mono, x, y, w, h, scroll: 0.0, t: 1.0, a: 1.0)
+//
+//   f      — the live frame borrow (draw calls hang off it)
+//   slot   — the custody-plane slot file-open minted; res-doc-each
+//            and res-path read it
+//   face   — a mono font handle: libs/metal:font.load in a windowed
+//            host, code-font on a headless surface
+//   scroll — scroll offset in LINE units; fractional drifts smoothly
+//   t      — entry progress 0..1; the caller drives it, lines rise
+//            and settle in a stagger
+//   a      — master alpha
+//
+// Headless companions. metal's text tors (font.load, text.offset,
+// text.ascent/descent) all take *Window<opened|active>, which an
+// offscreen Surface cannot mint — so a surface-side caller loads and
+// measures through these procs instead. They ride the frame's OWN
+// TextSystem and metal's font registry: same shaper, same cache, same
+// handles draw.textface consumes — the numbers are the renderer's,
+// never assumed metrics.
+
+~import libs/metal
+~import app/omni_img
+
+const std = @import("std");
+const M = @import("root").koru_libs.koru_metal;
+const R = @import("root").koru_app.koru_omni_img;
+
+// Ease-out cubic on a clamped 0..1 progress — the entry motion's curve.
+~[retain]pub tor code-ease { t: f64 } -> f64
+
+~proc code-ease|zig {
+    const u = @min(1.0, @max(0.0, t));
+    const q = 1.0 - u;
+    return 1.0 - q * q * q;
+}
+
+// font.load's offscreen twin — the window param it takes is ignored by
+// the proc, so the job is identical: CGDataProvider + CGFont appended
+// to metal's registry, the 1-based handle draw.textface consumes back.
+~pub tor code-font { path: string } | font i64 | err string
+
+~proc code-font|zig {
+    const pool = M.objc_autoreleasePoolPush();
+    defer M.objc_autoreleasePoolPop(pool);
+    var pbuf: [1024]u8 = undefined;
+    const dp = M.CGDataProviderCreateWithFilename(M.cstr(path, &pbuf)) orelse
+        return .{ .err = "metal: font file not readable" };
+    defer M.cf.CFRelease(dp);
+    const cg = M.CGFontCreateWithDataProvider(dp) orelse
+        return .{ .err = "metal: not a font file" };
+    M.loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("metal: OOM registering font");
+    return .{ .font = @intCast(M.loaded_fonts.items.len) };
+}
+
+// The shaped width of `text` — text.offset's surface-side twin. The
+// frame's TextSystem shapes it, so a span lands where the renderer
+// will put it.
+~[retain]pub tor code-measure { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64 } -> f64
+
+~proc code-measure|zig {
+    return @floatCast(f.text.layout(text, face, @floatCast(size)).width);
+}
+
+// The measured line box — ascent + descent at this size and face,
+// padded to the code rhythm. Baselines are derived, never guessed.
+~[retain]pub tor code-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+
+~proc code-lineh|zig {
+    const ft = f.text.font(face, @floatCast(size));
+    const asc: f64 = @floatCast(ft.ascent);
+    const dsc: f64 = @floatCast(ft.descent);
+    return (asc + dsc) * 1.5;
+}
+
+// One decimal tag — a line number, a count. A short-lived render
+// string, the res-path slice idiom.
+var code_tag_buf: [24]u8 = undefined;
+
+~[retain]pub tor code-tag { n: i64 } -> string
+
+~proc code-tag|zig {
+    return std.fmt.bufPrint(&code_tag_buf, "{d}", .{n}) catch "";
+}
+
+// The count as a header tag — "14 lines". Separate buffer so it can
+// sit beside a code-tag call in one chain.
+var code_ltag_buf: [32]u8 = undefined;
+
+~[retain]pub tor code-say-lines { n: i64 } -> string
+
+~proc code-say-lines|zig {
+    return std.fmt.bufPrint(&code_ltag_buf, "{d} lines", .{n}) catch "";
+}
+
+// The path's last segment — a header names its file, not its directory.
+~[retain]pub tor code-path-tail { path: string } -> string
+
+~proc code-path-tail|zig {
+    const i = if (std.mem.lastIndexOfScalar(u8, path, '/')) |ix| ix + 1 else 0;
+    return path[i..];
+}
+
+// The first live doc slot — file-open hands back custody (a handle),
+// the seam reads by slot; this is the bridge between them. -1 when no
+// decoded document is resident — the caller's empty state.
+~[retain]pub tor code-doc-slot {} -> i64
+
+~proc code-doc-slot|zig {
+    for (0..R.opened) |s| {
+        if (R.files[s] != null and R.kinds[s] == 0 and R.doc_n[s] > 0) return @intCast(s);
+    }
+    return -1;
+}
+
+// One span of syntax — `dx` is the shaped width of the line's prefix
+// (where draw.textface puts the run), `text` slices the line's own
+// bytes, `kind` names what the tokenizer saw:
+//   0 plain   1 comment   2 string   3 number   4 keyword   5 sigil
+pub const CodeSpan = struct { dx: f64, text: []const u8, kind: i64 };
+
+const code_kws = [_][]const u8{
+    "tor",   "proc",   "pub",   "import", "part",  "if",   "then",
+    "else",  "for",    "while", "and",    "or",    "not",  "const",
+    "var",   "return", "true",  "false",  "err",
+};
+
+fn codeIsKw(w: []const u8) bool {
+    for (code_kws) |k| {
+        if (std.mem.eql(u8, w, k)) return true;
+    }
+    return false;
+}
+
+fn codeIsPunct(c: u8) bool {
+    return switch (c) {
+        '(', ')', '{', '}', '[', ']', '<', '>', ':', ',', '.', ';',
+        '=', '+', '-', '*', '/', '&', '|', '!', '~', '@', '?', '#', '%',
+        => true,
+        else => false,
+    };
+}
+
+// One source line walked into syntax spans — `! span` fires per token.
+// `//` comments to end of line; "..." honors backslash escapes; numbers
+// take digits, dots, hex letters and `_`; the Koru word list makes a
+// keyword; runs of punctuation are sigils; everything else is plain.
+// Whitespace fires nothing — gaps are just air between spans.
+~[retain]pub tor code-spans {
+    f: *libs/metal:Frame<frame>,
+    text: string, size: f64, face: i64,
+}
+! span CodeSpan
+| drained
+
+~proc code-spans|zig {
+    const sz: f32 = @floatCast(size);
+    var pos: usize = 0;
+    while (pos < text.len) {
+        const c = text[pos];
+        if (c == ' ' or c == '\t') {
+            pos += 1;
+            continue;
+        }
+        var kind: i64 = 0;
+        var stop: usize = pos + 1;
+        if (c == '/' and stop < text.len and text[stop] == '/') {
+            kind = 1;
+            stop = text.len;
+        } else if (c == '"') {
+            kind = 2;
+            while (stop < text.len and text[stop] != '"') : (stop += 1) {
+                if (text[stop] == '\\') stop += 1;
+            }
+            if (stop < text.len) stop += 1;
+        } else if (c >= '0' and c <= '9') {
+            kind = 3;
+            while (stop < text.len and
+                (std.ascii.isAlphanumeric(text[stop]) or text[stop] == '.' or text[stop] == '_')) : (stop += 1)
+            {}
+        } else if (std.ascii.isAlphabetic(c) or c == '_') {
+            while (stop < text.len and
+                (std.ascii.isAlphanumeric(text[stop]) or text[stop] == '_')) : (stop += 1)
+            {}
+            kind = if ($mod.codeIsKw(text[pos..stop])) 4 else 0;
+        } else {
+            kind = 5;
+            while (stop < text.len and $mod.codeIsPunct(text[stop])) : (stop += 1) {}
+        }
+        const dx = f.text.layout(text[0..pos], face, sz).width;
+        span(.{ .dx = @as(f64, @floatCast(dx)), .text = text[pos..stop], .kind = kind });
+        pos = stop;
+    }
+    return .{ .drained = .{} };
+}
+
+// The component. One draw chain: shadow, ink silk body, champagne
+// hairline, header (basename + line count), gutter, clipped code rows,
+// scroll rail. `e` is the eased entry — the card rises 14pt and fades
+// in, and each line staggers behind it by 0.03 of the progress.
+~pub tor codeview {
+    f: *libs/metal:Frame<frame>,
+    slot: i64, face: i64,
+    x: f64, y: f64, w: f64, h: f64,
+    scroll: f64, t: f64, a: f64,
+}
+
+~codeview = code-ease(t) : e
+    |> code-lineh(f, size: 13.0, face) : lh
+    |> code-measure(f, text: "88", size: 11.0, face) : gw
+    |> app/omni_img:res-doc-n(slot) : n
+    // floor shadow — the card floats over the room's silk
+    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
+    // ink body — the dark silk pane the material puts code on
+    |> libs/metal:draw.silk(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * e, angle: 0.35, folds: 2.0, sheen: 0.4, pearl: 0.3)
+    // champagne hairline around the body
+    |> libs/metal:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
+    // header — the file's own basename left, its line count right
+    |> app/omni_img:res-path(slot) : pth
+    |> code-path-tail(path: pth) : ttl
+    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
+    |> code-say-lines(n) : nt
+    |> code-measure(f, text: nt, size: 11.0, face) : nw
+    |> libs/metal:draw.textface(f, x: x + w - 16.0 - nw, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: nt)
+    // the header rule and the gutter rule — champagne hairlines
+    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
+    |> libs/metal:draw.rect(f, x: x + 16.0 + gw + 10.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
+    // the code — clipped to the body below the header; a resource with
+    // zero decoded lines says so in its empty state, inventing no text
+    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> app/omni_img:res-doc-each(slot)
+        ! row l |> code-tag(n: l.i + 1) : tag
+            |> code-measure(f, text: tag, size: 11.0, face) : tw
+            // the gutter number — right-aligned on the measured width
+            |> libs/metal:draw.textface(f, x: x + 16.0 + gw - tw, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 11.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6)) * 0.9, text: tag)
+            // the line's own spans — tokenizer kinds mapped to the palette
+            |> code-spans(f, l.text, size: 13.0, face)
+                ! span sp |> libs/metal:draw.textface(f, x: x + 16.0 + gw + 22.0 + sp.dx, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 13.0, font: face,
+                    r: if (sp.kind == 1) @as(f64, 0.50) else if (sp.kind == 2) @as(f64, 0.93) else if (sp.kind == 3) @as(f64, 0.90) else if (sp.kind == 4) @as(f64, 0.98) else if (sp.kind == 5) @as(f64, 0.72) else 0.90,
+                    g: if (sp.kind == 1) @as(f64, 0.45) else if (sp.kind == 2) @as(f64, 0.62) else if (sp.kind == 3) @as(f64, 0.82) else if (sp.kind == 4) @as(f64, 0.80) else if (sp.kind == 5) @as(f64, 0.67) else 0.85,
+                    b: if (sp.kind == 1) @as(f64, 0.36) else if (sp.kind == 2) @as(f64, 0.50) else if (sp.kind == 3) @as(f64, 0.52) else if (sp.kind == 4) @as(f64, 0.46) else if (sp.kind == 5) @as(f64, 0.55) else 0.76,
+                    a: a * @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6)), sp.text)
+                | drained |> _
+        | drained |> if (n == 0)
+            | then |> code-measure(f, text: "no readable source lines", size: 12.0, face) : ew
+                |> libs/metal:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - e) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * e, text: "no readable source lines")
+    |> libs/metal:draw.clip.pop(f)
+    // the scroll rail + thumb — only while the file overflows the view
+    |> if (@as(f64, @floatFromInt(n)) * lh > h - 46.0)
+        | then |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
+            |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(n)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * e)

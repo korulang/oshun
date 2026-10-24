@@ -1,0 +1,451 @@
+// diffview — a unified diff as a surface.
+//
+// What a diff IS, drawn from its own bytes: `@@ -a,b +c,d @@` hunk
+// headers reset the running old/new line counters the parser keeps,
+// the leading byte of every line classifies it — ' ' context, '+' added,
+// '-' removed, everything else file meta — and the row table carries
+// kind, hunk ordinal, and both line numbers out to the draw chain.
+// The surface: an ink silk card on the champagne room, a header that
+// reads the diff's own name and stats (+adds -dels in K hunks), a
+// two-column old|new line-number gutter right-aligned on shaped widths,
+// per-kind row bands, a proportional scroll rail, and hunks that ARRIVE
+// staggered instead of popping — each hunk ordinal waits its beat and
+// sweeps in as a unit.
+//
+//   diff-load(path: "real.diff") | ok slot |>
+//       diffview(f, slot, face: mono, x, y, w, h, scroll: 0.0, t, a)
+//
+//   slot   — a diff-load slot: real parsed bytes, not a painted shape
+//   face   — a mono font handle: libs/metal:font.load in a windowed
+//            host, diff-font on a headless surface
+//   scroll — scroll offset in LINE units; fractional drifts smoothly
+//   t      — entry progress in seconds since mount; the caller drives
+//            the clock, hunks rise and settle in their stagger
+//   a      — master alpha
+//
+// Headless companions. metal's text tors (font.load, text.offset,
+// text.ascent/descent) all take *Window<opened|active>, which an
+// offscreen Surface cannot mint — so a surface-side caller loads and
+// measures through these procs instead. They ride the frame's OWN
+// TextSystem and metal's font registry: same shaper, same cache, same
+// handles draw.textface consumes — the numbers are the renderer's,
+// never assumed metrics.
+
+~import libs/metal
+
+const std = @import("std");
+const M = @import("root").koru_libs.koru_metal;
+
+// ============================================================================
+// The row table — parsed at diff-load, streamed by diff-each
+// ============================================================================
+
+const MAX_SLOTS = 4;
+const MAX_ROWS = 384;
+const BUF_CAP = 256 * 1024;
+
+// One parsed diff row, fired at the surface once per draw call. `kind`:
+// 0 context · 1 added · 2 removed · 3 hunk header · 4 file meta.
+// `hunk` is the hunk ordinal the row belongs to (-1 = the preamble
+// before the first @@ — it lands first in the entry stagger).
+// old_s/new_s are the PRE-FORMATTED gutter numbers, "" where a row has
+// no number on that side — added rows carry no old, removed no new,
+// headers and meta carry none.
+pub const DiffRow = struct {
+    i: i64,
+    kind: i64,
+    hunk: i64,
+    old_s: []const u8,
+    new_s: []const u8,
+    text: []const u8,
+};
+
+var slot_live: [MAX_SLOTS]bool = .{false} ** MAX_SLOTS;
+var slot_buf: [MAX_SLOTS][BUF_CAP]u8 = undefined;
+var slot_n: [MAX_SLOTS]i64 = .{0} ** MAX_SLOTS;
+var slot_trunc: [MAX_SLOTS]i64 = .{0} ** MAX_SLOTS;
+var slot_adds: [MAX_SLOTS]i64 = .{0} ** MAX_SLOTS;
+var slot_dels: [MAX_SLOTS]i64 = .{0} ** MAX_SLOTS;
+var slot_hunks: [MAX_SLOTS]i64 = .{0} ** MAX_SLOTS;
+var slot_path: [MAX_SLOTS][256]u8 = undefined;
+var slot_path_len: [MAX_SLOTS]usize = .{0} ** MAX_SLOTS;
+var row_kind: [MAX_SLOTS][MAX_ROWS]i64 = undefined;
+var row_hunk: [MAX_SLOTS][MAX_ROWS]i64 = undefined;
+var row_old: [MAX_SLOTS][MAX_ROWS]i64 = undefined;
+var row_new: [MAX_SLOTS][MAX_ROWS]i64 = undefined;
+var row_off: [MAX_SLOTS][MAX_ROWS]u32 = undefined;
+var row_len: [MAX_SLOTS][MAX_ROWS]u16 = undefined;
+
+// Read a real .diff/.patch file and parse the unified grammar into the
+// row table. The file's own bytes drive everything: `--- `/`+++ `/meta
+// lines stay meta, `@@` headers reset the counters from the ranges they
+// declare (an unparseable header leaves them at 0 — the gutter stays
+// honestly blank rather than inventing numbers), and rows past MAX_ROWS
+// count into slot_trunc so the surface can say "more" out loud.
+~[retain]pub tor diff-load { path: string }
+| ok i64
+| err string
+
+~proc diff-load|zig {
+    var s: usize = 0;
+    while (s < MAX_SLOTS) : (s += 1) {
+        if (!slot_live[s]) break;
+    }
+    if (s >= MAX_SLOTS) return .{ .err = "diff-load: slot table full" };
+    const f = std.fs.cwd().openFile(path, .{}) catch
+        return .{ .err = "diff-load: file not readable" };
+    defer f.close();
+    const size = (f.stat() catch return .{ .err = "diff-load: stat failed" }).size;
+    if (size > BUF_CAP) return .{ .err = "diff-load: file too large" };
+    const got = f.readAll(slot_buf[s][0..@intCast(size)]) catch
+        return .{ .err = "diff-load: read failed" };
+    const buf = slot_buf[s][0..got];
+    const pn = @min(path.len, 255);
+    @memcpy(slot_path[s][0..pn], path[0..pn]);
+    slot_path_len[s] = pn;
+    var n: usize = 0;
+    var old_run: i64 = 0;
+    var new_run: i64 = 0;
+    var hunk_i: i64 = -1;
+    var adds: i64 = 0;
+    var dels: i64 = 0;
+    var skipped: i64 = 0;
+    var pos: usize = 0;
+    while (pos < buf.len) {
+        const nl = std.mem.indexOfScalarPos(u8, buf, pos, '\n') orelse buf.len;
+        var line = buf[pos..nl];
+        pos = nl + 1;
+        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+        if (line.len == 0 and pos >= buf.len) break;
+        if (n >= MAX_ROWS) {
+            skipped += 1;
+            continue;
+        }
+        var kind: i64 = 4;
+        if (line.len >= 2 and line[0] == '@' and line[1] == '@') {
+            kind = 3;
+            hunk_i += 1;
+            old_run = 0;
+            new_run = 0;
+            var k: usize = 0;
+            while (k < line.len) : (k += 1) {
+                if (line[k] == '-' or line[k] == '+') {
+                    const sign = line[k];
+                    k += 1;
+                    var v: i64 = 0;
+                    var digs = false;
+                    while (k < line.len and line[k] >= '0' and line[k] <= '9') : (k += 1) {
+                        v = v * 10 + @as(i64, line[k] - '0');
+                        digs = true;
+                    }
+                    if (digs) {
+                        if (sign == '-') {
+                            old_run = v;
+                        } else {
+                            new_run = v;
+                        }
+                    }
+                    if (old_run > 0 and new_run > 0) break;
+                }
+            }
+        } else if (line.len >= 4 and
+            (std.mem.eql(u8, line[0..4], "--- ") or std.mem.eql(u8, line[0..4], "+++ ")))
+        {
+            kind = 4;
+        } else if (line.len > 0) {
+            kind = switch (line[0]) {
+                '+' => 1,
+                '-' => 2,
+                ' ' => 0,
+                else => 4,
+            };
+        }
+        var ol: i64 = 0;
+        var nnl: i64 = 0;
+        switch (kind) {
+            0 => {
+                ol = old_run;
+                nnl = new_run;
+                old_run += 1;
+                new_run += 1;
+            },
+            1 => {
+                nnl = new_run;
+                new_run += 1;
+                adds += 1;
+            },
+            2 => {
+                ol = old_run;
+                old_run += 1;
+                dels += 1;
+            },
+            else => {},
+        }
+        row_kind[s][n] = kind;
+        row_hunk[s][n] = hunk_i;
+        row_old[s][n] = ol;
+        row_new[s][n] = nnl;
+        row_off[s][n] = @intCast(@intFromPtr(line.ptr) - @intFromPtr(buf.ptr));
+        row_len[s][n] = @intCast(@min(line.len, 0xFFFF));
+        n += 1;
+    }
+    slot_n[s] = @intCast(n);
+    slot_trunc[s] = skipped;
+    slot_adds[s] = adds;
+    slot_dels[s] = dels;
+    slot_hunks[s] = hunk_i + 1;
+    slot_live[s] = true;
+    return .{ .ok = @intCast(s) };
+}
+
+// The parsed-row count — 0 is the honest "no rows" signal the draw
+// side reads for its empty state.
+~[retain]pub tor diff-n { slot: i64 } -> i64
+
+~proc diff-n|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_n[s];
+}
+
+// The real stats the header reads — added lines, removed lines, hunks.
+~[retain]pub tor diff-adds { slot: i64 } -> i64
+
+~proc diff-adds|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_adds[s];
+}
+
+~[retain]pub tor diff-dels { slot: i64 } -> i64
+
+~proc diff-dels|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_dels[s];
+}
+
+~[retain]pub tor diff-hunks { slot: i64 } -> i64
+
+~proc diff-hunks|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_hunks[s];
+}
+
+// Rows the file carried past MAX_ROWS — the truncation footer's count.
+~[retain]pub tor diff-trunc { slot: i64 } -> i64
+
+~proc diff-trunc|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_trunc[s];
+}
+
+// The path the slot was loaded from — the header names its file.
+~[retain]pub tor diff-path { slot: i64 } -> string
+
+~proc diff-path|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    return slot_path[s][0..slot_path_len[s]];
+}
+
+// The path's last segment — a header names its file, not its directory.
+~[retain]pub tor diff-tail { path: string } -> string
+
+~proc diff-tail|zig {
+    const i = if (std.mem.lastIndexOfScalar(u8, path, '/')) |ix| ix + 1 else 0;
+    return path[i..];
+}
+
+// Fire once per parsed row, in file order, with the pre-formatted
+// gutter strings. The number slices are scratch — valid for the firing,
+// the res-doc-each borrow idiom.
+~[retain]pub tor diff-each { slot: i64 }
+! row DiffRow
+| drained
+
+~proc diff-each|zig {
+    const s: usize = @intCast(@max(0, @min(slot, $mod.MAX_SLOTS - 1)));
+    var obuf: [16]u8 = undefined;
+    var nbuf: [16]u8 = undefined;
+    for (0..@intCast(@max(0, $mod.slot_n[s]))) |i| {
+        const os = if ($mod.row_old[s][i] > 0)
+            std.fmt.bufPrint(&obuf, "{d}", .{$mod.row_old[s][i]}) catch ""
+        else
+            "";
+        const ns = if ($mod.row_new[s][i] > 0)
+            std.fmt.bufPrint(&nbuf, "{d}", .{$mod.row_new[s][i]}) catch ""
+        else
+            "";
+        const off: usize = @intCast($mod.row_off[s][i]);
+        const len: usize = @intCast($mod.row_len[s][i]);
+        row(.{
+            .i = @as(i64, @intCast(i)),
+            .kind = $mod.row_kind[s][i],
+            .hunk = $mod.row_hunk[s][i],
+            .old_s = os,
+            .new_s = ns,
+            .text = $mod.slot_buf[s][off..][0..len],
+        });
+    }
+    return .{ .drained = .{} };
+}
+
+// Release a slot — the buffers are static so this is a flag flip, but it
+// keeps the custody story honest: load → draw → free.
+~[retain]pub tor diff-free { slot: i64 }
+
+~proc diff-free|zig {
+    const s: usize = @intCast(@max(0, @min(slot, MAX_SLOTS - 1)));
+    slot_live[s] = false;
+    slot_n[s] = 0;
+    slot_trunc[s] = 0;
+    slot_adds[s] = 0;
+    slot_dels[s] = 0;
+    slot_hunks[s] = 0;
+    slot_path_len[s] = 0;
+}
+
+// ============================================================================
+// Headless companions — the frame's own TextSystem, metal's registry
+// ============================================================================
+
+// font.load's offscreen twin — the window param it takes is ignored by
+// the proc, so the job is identical: CGDataProvider + CGFont appended
+// to metal's registry, the 1-based handle draw.textface consumes back.
+~pub tor diff-font { path: string } | font i64 | err string
+
+~proc diff-font|zig {
+    const pool = M.objc_autoreleasePoolPush();
+    defer M.objc_autoreleasePoolPop(pool);
+    var pbuf: [1024]u8 = undefined;
+    const dp = M.CGDataProviderCreateWithFilename(M.cstr(path, &pbuf)) orelse
+        return .{ .err = "diff-font: font file not readable" };
+    defer M.cf.CFRelease(dp);
+    const cg = M.CGFontCreateWithDataProvider(dp) orelse
+        return .{ .err = "diff-font: not a font file" };
+    M.loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("diff-font: OOM registering font");
+    return .{ .font = @intCast(M.loaded_fonts.items.len) };
+}
+
+// The shaped width of `text` on the frame's own shaper — text.offset's
+// surface-side twin; a span lands where the renderer will put it.
+~[retain]pub tor diff-measure { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64 } -> f64
+
+~proc diff-measure|zig {
+    return @floatCast(f.text.layout(text, face, @floatCast(size)).width);
+}
+
+// The measured line height — ascent + descent at this size and face,
+// padded to the code rhythm. Baselines are derived, never guessed:
+// textTop = rowTop + lh/6 centers the asc+desc box inside lh.
+~[retain]pub tor diff-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+
+~proc diff-lineh|zig {
+    const ft = f.text.font(face, @floatCast(size));
+    return (@as(f64, ft.ascent) + @as(f64, ft.descent)) * 1.5;
+}
+
+// One composed stat line for the header — "+a -d in K hunks" — a
+// short-lived render string, the res-path slice idiom. One buffer, one
+// call: two sibling scratch buffers in one concat would corrupt.
+var diff_stat_buf: [64]u8 = undefined;
+
+~[retain]pub tor diff-stat { adds: i64, dels: i64, hunks: i64, trunc: i64 } -> string
+
+~proc diff-stat|zig {
+    if (trunc > 0) {
+        return std.fmt.bufPrint(&diff_stat_buf, "+{d} -{d} in {d} hunks, {d} over cap", .{ adds, dels, hunks, trunc }) catch "";
+    }
+    return std.fmt.bufPrint(&diff_stat_buf, "+{d} -{d} in {d} hunks", .{ adds, dels, hunks }) catch "";
+}
+
+// ============================================================================
+// The tor — one draw chain over the parsed rows
+// ============================================================================
+
+// Per-hunk arrival progress, 0..1 — hunk ordinal k waits k·0.35 then
+// sweeps in over ~0.77 units of t; the preamble (hunk -1) lands first.
+~tor diff-rise { t: f64, hunk: i64 } -> f64
+~diff-rise -> @max(0.0, @min(1.0, (t - 0.12 - (@as(f64, @floatFromInt(hunk)) + 1.0) * 0.35) * 1.3))
+
+// Cubic-out on a 0..1 progress — the settle curve. Pub: callers ease
+// their own chrome (a scroll drift, a caption fade) on the same curve.
+~pub tor diff-ease { u: f64 } -> f64
+~diff-ease -> 1.0 - (1.0 - u) * (1.0 - u) * (1.0 - u)
+
+// A row's top y — on the measured leading grid, scrolled in line units,
+// rising 9pt while its hunk arrives and 14pt while the card eases.
+~tor diff-rowtop { y: f64, i: i64, scroll: f64, lh: f64, ce: f64, e: f64 } -> f64
+~diff-rowtop -> y + (1.0 - ce) * 14.0 + 40.0 + (@as(f64, @floatFromInt(i)) - scroll) * lh + (1.0 - e) * 9.0
+
+// The component. One draw chain: floor shadow, ink silk body, champagne
+// hairline, header (file name + the diff's real stats), clipped rows —
+// per-kind bands and text, the old|new gutter, the @@ band — and the
+// scroll rail when the diff is taller than the card.
+~pub tor diffview {
+    f: *libs/metal:Frame<frame>,
+    slot: i64, face: i64,
+    x: f64, y: f64, w: f64, h: f64,
+    scroll: f64, t: f64, a: f64,
+}
+
+~diffview = diff-ease(u: @max(0.0, @min(1.0, t * 1.4))) : ce
+    |> diff-lineh(f, size: 13.0, face) : lh
+    |> diff-measure(f, text: "0000", size: 10.0, face) : gw
+    |> diff-n(slot) : rn
+    |> diff-adds(slot) : na
+    |> diff-dels(slot) : nd
+    |> diff-hunks(slot) : nh
+    |> diff-trunc(slot) : tr
+    |> diff-stat(adds: na, dels: nd, hunks: nh, trunc: tr) : stat
+    |> diff-measure(f, text: stat, size: 10.5, face) : sw
+    |> diff-path(slot) : pth
+    |> diff-tail(path: pth) : ttl
+    // floor shadow — the card floats over the room's silk
+    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - ce) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * ce)
+    // ink body — the dark silk pane the material puts code on
+    |> libs/metal:draw.silk(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * ce, angle: 0.35, folds: 2.0, sheen: 0.4, pearl: 0.3)
+    // champagne hairline around the body
+    |> libs/metal:draw.panel(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * ce)
+    // header — the file's basename left, its real stats right
+    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - ce) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * ce, text: ttl)
+    |> libs/metal:draw.textface(f, x: x + w - 16.0 - sw, y: y + (1.0 - ce) * 14.0 + 10.0, size: 10.5, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * ce, text: stat)
+    // the header rule and the gutter rule — champagne hairlines
+    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - ce) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * ce)
+    |> libs/metal:draw.rect(f, x: x + 16.0 + gw * 2.0 + 22.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
+    // the rows — clipped below the header; a slot with zero parsed rows
+    // says so in its empty state, inventing no text
+    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> diff-each(slot)
+        ! row r |> diff-rise(t, r.hunk) : ru
+            |> diff-ease(u: ru) : e
+            // row top — the measured leading grid, rising 9pt while its
+            // hunk arrives; text sits on the centered measured baseline
+            |> diff-rowtop(y, r.i, scroll, lh, ce, e) : ry
+            // the row band — green over ink for adds, red for removes,
+            // a champagne wash for the @@ header; ctx/meta carry none
+            |> libs/metal:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: lh, r: if (r.kind == 1) @as(f64, 0.35) else (if (r.kind == 2) @as(f64, 0.80) else 0.95), g: if (r.kind == 1) @as(f64, 0.75) else (if (r.kind == 2) @as(f64, 0.30) else 0.85), b: if (r.kind == 1) @as(f64, 0.45) else (if (r.kind == 2) @as(f64, 0.25) else 0.45), a: e * (if (r.kind == 1) @as(f64, 0.16) else (if (r.kind == 2) @as(f64, 0.15) else (if (r.kind == 3) @as(f64, 0.12) else 0.0))))
+            // a hairline separator above every hunk header
+            |> if (r.kind == 3)
+                | then |> libs/metal:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: e * 0.30)
+            // old-side gutter number — right-aligned on the shaped width;
+            // the cell stays empty where a row has no old-side number
+            |> diff-measure(f, text: r.old_s, size: 10.0, face) : ow
+            |> if (r.old_s.len > 0)
+                | then |> libs/metal:draw.textface(f, x: x + 16.0 + gw - ow, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.old_s)
+            // new-side gutter number — the second column, same alignment
+            |> diff-measure(f, text: r.new_s, size: 10.0, face) : nw
+            |> if (r.new_s.len > 0)
+                | then |> libs/metal:draw.textface(f, x: x + 16.0 + gw + 6.0 + gw - nw, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.new_s)
+            // the line itself — the +/- prefix byte included, colored by
+            // the kind the parser read off the real bytes
+            |> libs/metal:draw.textface(f, x: x + 16.0 + gw * 2.0 + 32.0, y: ry + lh / 6.0, size: 13.0, font: face,
+                r: if (r.kind == 1) @as(f64, 0.45) else (if (r.kind == 2) @as(f64, 0.95) else (if (r.kind == 3) @as(f64, 0.95) else (if (r.kind == 4) @as(f64, 0.62) else 0.88))),
+                g: if (r.kind == 1) @as(f64, 0.85) else (if (r.kind == 2) @as(f64, 0.55) else (if (r.kind == 3) @as(f64, 0.83) else (if (r.kind == 4) @as(f64, 0.55) else 0.85))),
+                b: if (r.kind == 1) @as(f64, 0.55) else (if (r.kind == 2) @as(f64, 0.50) else (if (r.kind == 3) @as(f64, 0.55) else (if (r.kind == 4) @as(f64, 0.42) else 0.78))),
+                a: a * e * (if (r.kind == 4) @as(f64, 0.6) else (if (r.kind == 3) @as(f64, 0.9) else 0.92)), r.text)
+        | drained |> if (rn == 0)
+            | then |> diff-measure(f, text: "empty diff — no rows parsed", size: 12.0, face) : ew
+                |> libs/metal:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - ce) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * ce, text: "empty diff — no rows parsed")
+    |> libs/metal:draw.clip.pop(f)
+    // the scroll rail + thumb — only while the diff overflows the view
+    |> if (@as(f64, @floatFromInt(rn)) * lh > h - 46.0)
+        | then |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
+            |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(rn)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * ce)
