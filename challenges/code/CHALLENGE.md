@@ -77,8 +77,21 @@ count), `turnview` (prompt + streamed items by kind), `markdown`
 3. Structure is real, not painted: gutter aligns to lines, diff colors
    follow `+`/`-`, highlights ride actual spans — a colored rect with a
    label is disqualified on sight.
-4. It looks finished: measured text, real layout, the champagne language
-   unless the job argues otherwise.
+4. It looks **premium**, not merely finished. Concretely:
+   - **Motion** — the component enters with intent (spring/stagger/
+     settle, nanoui's `ui/motion` vocabulary is the reference), not a
+     static pop. A diff doesn't appear; hunks arrive.
+   - **Material coherence** — champagne/pearlescent on surfaces, glass
+     or frost where backdrop reads earn it, real shadows (`draw.shadow`)
+     not flat rects. The material language is load-bearing, not decor.
+   - **Typographic craft** — `font.load` for mono, measured baselines,
+     real line-height rhythm, hairline separators. Code in the system
+     face is disqualified.
+   - **State honesty** — hover/focus/active where the component takes
+     input; a real empty state; long text truncates or scrolls, never
+     clips mid-glyph.
+   - **In context** — the demo renders the component *on* a composed
+     surface (card, pane, silk bed), not alone on black.
 
 ## Ship shape (zero-friction, same-checkout)
 
@@ -110,10 +123,13 @@ STOP, float, pin, no route-around.
 
 1. Named tor, called from the demo.
 2. Draws real bytes with real structure.
-3. Compiles clean; demo produces a visible or snapshotted render.
-4. Thesis in one sentence — what *shape* this renders.
-5. Walls named or "hit no wall."
-6. Catalog line appended only if the bar cleared.
+3. Compiles clean; demo produces a visible or snapshotted render —
+   **in context**, per bar 4.
+4. Premium self-check: name the motion, the material calls, the face —
+   if any clause of bar 4 was skipped, say which and why.
+5. Thesis in one sentence — what *shape* this renders.
+6. Walls named or "hit no wall."
+7. Catalog line reported only if the bar cleared.
 
 ## Self-ground — never invent
 
