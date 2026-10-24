@@ -80,13 +80,28 @@ count), `turnview` (prompt + streamed items by kind), `markdown`
 4. It looks finished: measured text, real layout, the champagne language
    unless the job argues otherwise.
 
-## Ship shape (zero-friction)
+## Ship shape (zero-friction, same-checkout)
 
-- **Tor:** `components/` (index.kz or a sibling it re-exports).
-- **Demo:** `metal/tests/code_<name>.k` — compiles via koruc, renders a
-  real artifact, snapshots via `offscreen.snap` where a window would
-  interrupt the walker's screen.
-- **Catalog:** one line in `challenges/code/CATALOG.md`.
+Contestants share the working tree — **no worktrees**. The isolation
+moves to file namespaces: your replay writes files that carry your
+component's name, plus exactly one shared-file append (the index.kz
+re-export). The arbiter performs every other shared-file write at
+landing.
+
+- **Tor:** `components/code_<name>.kz` — a new sibling file, plus the
+  **one-line re-export in `components/index.kz`** your demo needs to
+  import it. That append is the only shared-file write you're allowed;
+  if it collides with a sibling replay, the arbiter reconciles at
+  landing — a one-line append is trivially recoverable.
+- **Demo:** `metal/tests/code_<name>.k` — compiles via `koruc
+  code_<name>.k -o code_<name>.zig` or `koruc build`; emit names are
+  yours. Snapshot via `offscreen.snap` where a window would interrupt
+  the walker's screen.
+- **Catalog:** do **not** edit `CATALOG.md` — report your catalog line
+  in your result; the arbiter appends it on acceptance.
+- **No commits.** Leave your files uncommitted; the arbiter commits
+  survivors and sweeps losers. Petals fall as untracked files, not
+  history.
 
 Touch `metal/index.kz` only for a new primitive. Clean code rejected →
 STOP, float, pin, no route-around.
