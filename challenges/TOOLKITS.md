@@ -103,6 +103,33 @@ terminal where agent sessions are first-class. The pieces that matter:
   worked example of session-UI layout without a browser.
 - `mcp_server.zig` (150 lines) — they also *host* MCP for the agents.
 
+### Port map — what a Koru-native `libs/acp` actually needs
+
+Dependency-ordered, scouted against our tree (Zig 0.15.2 emitted; nanoterm
+targets 0.17 — the externs are stable, `std.Io`/`std.json` call sites need
+adapting at the seams):
+
+1. **`proc_posix.zig` (263L)** — `posix_spawnp` + pipe dup2 +
+   `O_NONBLOCK` + `Tail` stderr ring. Pure externs; our std only has
+   blocking `Child.run` in ~zig bodies, so this is genuinely new
+   machinery — and it's a ~proc host-verb shape already.
+2. **`acp.zig` (176L)** — ndjson JSON-RPC on the pipes. `std.json` 0.15
+   covers parse/stringify inside ~zig bodies; the pending-callback map
+   becomes store rows or plain Zig in the proc layer.
+3. **`agents.zig` (67L)** — the `searchPath()` extra-dirs list ports
+   verbatim; it is the launchd-PATH fix we hand-rolled.
+4. **`agent.zig` (~450L) → Koru, not Zig** — Turn/Item is *data*: this
+   is the part that wants to be `std/store` rows + a kind-3 card, not a
+   ported struct. Adopt the schema, don't translate it.
+5. **`fdwatch.zig` (50L) — skippable for v1.** Their wake is GCD
+   `dispatch_source`; ours is already the frame pump — commander's
+   `! frame` arm drains `cmd-next` per iteration. `acp.drain`
+   (nonblocking read → complete lines → pending requests) slots into
+   the same seam; no evented fd watch needed until frames go idle.
+
+Total transport lift: ~440 lines of Zig adapted to 0.15.2, plus the
+agent-model portion *rewritten* in Koru where it belongs.
+
 ## Already built — where the custody plane is ahead
 
 The gap list is shorter than a raw vocabulary diff suggests. From
