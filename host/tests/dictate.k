@@ -33,45 +33,28 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
                             |> libs/metal:window.clear.color(win: ov, r: 0.07, g: 0.06, b: 0.11)
                             |> libs/metal:frames(win: ov, count: 9999999)
                                 ! frame f
-                                    |> libs/host:mic.read(mic: m, max: 8000)
-                                        | ok pcm |> libs/needle:stream.process(eng, pcm, language: "en")
-                                            | ok json |> std/json:get.string.opt(json, key: "text") : t
-                                                |> std/string:append(s: acc, text: t)
-                                                    | ok |> std/string:append(s: acc, text: " ")
-                                                        | ok |> std/io:free(content: t)
-                                                            |> std/io:free(content: json)
-                                                        | err e |> std/io:print.ln("append err: {{ e:s }}")
-                                                            |> std/io:free(content: t)
-                                                            |> std/io:free(content: json)
-                                                    | err e |> std/io:print.ln("append err: {{ e:s }}")
-                                                        |> std/io:free(content: t)
-                                                        |> std/io:free(content: json)
-                                            | err e |> std/io:print.ln("stream err: {{ e:s }}")
-                                        | empty
                                     |> libs/host:mic.level(mic: m, window: 800) : lv
                                     |> libs/metal:draw.rect(f, x: 20.0, y: 26.0, w: lv * 4000.0, h: 20.0, r: 0.4, g: 0.9, b: 0.5, a: 1.0)
                                 ! hotkey h2 when h2.key == 47 and h2.down == 0
                                     |> libs/metal:window.hide(win: ov)
-                                | done ov2 |> libs/needle:stream.stop(eng)
-                                    | ok json |> std/json:get.string.opt(json, key: "text") : t
-                                        |> std/json:get.string.opt(json, key: "pending") : p
-                                        |> std/string:append(s: acc, text: t)
-                                            | ok |> std/string:append(s: acc, text: p)
+                                | done ov2 |> libs/host:mic.read(mic: m, max: 480000)
+                                    | ok pcm |> libs/needle:transcribe(eng, pcm, language: "en")
+                                        | ok json |> std/json:get.string.opt(json, key: "text") : t
+                                            |> std/string:clear(s: acc)
+                                            |> std/string:append(s: acc, text: t)
                                                 | ok |> std/io:free(content: t)
-                                                    |> std/io:free(content: p)
                                                     |> std/io:free(content: json)
+                                                    |> std/io:free(content: pcm)
                                                     |> libs/host:paste.string(s: acc)
                                                         | ok |> std/io:print.ln("paste: ok")
                                                         | err e |> std/io:print.ln("paste err: {{ e:s }}")
                                                 | err e |> std/io:print.ln("append err: {{ e:s }}")
                                                     |> std/io:free(content: t)
-                                                    |> std/io:free(content: p)
                                                     |> std/io:free(content: json)
-                                            | err e |> std/io:print.ln("append err: {{ e:s }}")
-                                                |> std/io:free(content: t)
-                                                |> std/io:free(content: p)
-                                                |> std/io:free(content: json)
-                                    | err e |> std/io:print.ln("stop err: {{ e:s }}")
+                                                    |> std/io:free(content: pcm)
+                                        | err e |> std/io:print.ln("transcribe err: {{ e:s }}")
+                                            |> std/io:free(content: pcm)
+                                    | empty
                                     |> libs/metal:window.close(win: ov2)
                         | err e |> std/io:print.ln("overlay err: {{ e:s }}")
                 ! hotkey h when h.key == 12 and h.down == 1

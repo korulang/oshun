@@ -16,6 +16,7 @@
 //      KoruTrayTarget whose IMPs push into the tray ring.
 
 ~import std/build
+~import std/string
 
 ~std/build:requires {
     exe.linkLibC();
