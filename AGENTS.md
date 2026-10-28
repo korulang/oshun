@@ -82,22 +82,22 @@ VERIFIED: live streamed dictation — committed words w/ timestamps at
 `pending` = unconfirmed tail; transcript = JOIN of chunk texts + final
 pending. stop JSON carries only the tail — do not paste it raw.
 
-### OPEN: KORU031 choke merge
+### SOLVED: KORU031 choke merge
 
-Accumulate+paste (std/string acc + std/json get per chunk) hit KORU031
-"point-free choke claims by name across every stage — payload shapes
-must agree": branched tors mid-chain (`from-page`/`get.string`/`append`
-all have `| err`) inside arm-nested continuations; sibling `| err`
-payloads at a merge level must type-agree (mic.start's i32 vs
-from-page's string collided). Two koru_std additions sit UNCOMMITTED
-in `~/src/koru` awaiting ruling, NOT route-arounds:
-- `string.content { s: *String<view|instance> } -> string` — bytes-out
-  accessor (gap: len/substring exist, no read-out).
-- `json.get.string.opt { json, key } -> string` — no-branch variant
-  (empty-on-miss); two-branch get.string is what collides in chokes.
-Minimal repro = the accumulate shape in host/tests/dictate.k history;
-ruling belongs in koru analysis (choke-merge vocabulary) or a better
-accumulation spelling.
+The rule (src/ast_transform.zig:581-600): choke handlers replicate at
+EVERY stage of a `|>` chain and same-name variants across stages must
+carry agreeing payloads — `stream.stop`'s `| ok` (string) collided with
+`paste.text`'s `| ok` (none) at one level. Legal shape: keep each
+chain's same-name variants homogeneous (all `(none)`-ok inside
+`stop`'s `| ok` continuation; `string`-ok only at stop's level).
+`content` was ruled illegal by KORU095 (borrows flow down, never up —
+the consumer takes the handle): `paste.string` takes `*String` directly.
+Uncommitted in `~/src/koru` awaiting ruling, NOT route-arounds:
+- `string.make { text } -> *String<instance!>` — single-yield ctor
+  (from-page/new are `| ok`|err`; a ctor doesn't need branches).
+- `json.get.string.opt { json: string<*>, key } -> string<allocated!>`
+  — owned "" on miss; chains stay point-free.
+Both are needed by dictate.k's accumulate+paste (now compiling).
 
 ### Deferred
 

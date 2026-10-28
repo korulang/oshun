@@ -1240,7 +1240,7 @@ extern fn CGEventPost(tap: u32, ev: Id) void;
 | ok
 | err string
 
-~proc paste.text|zig {
+fn pasteTextProc(text: []const u8) ?[]const u8 {
     const pool = objc_autoreleasePoolPush();
     defer objc_autoreleasePoolPop(pool);
     const pb = send(Id, cls("NSPasteboard"), sel("generalPasteboard"));
@@ -1253,16 +1253,21 @@ extern fn CGEventPost(tap: u32, ev: Id) void;
     const wrote = send2(bool, Id, Id, pb, sel("setString:forType:"), @as(Id, @ptrCast(@constCast(val))), @as(Id, @ptrCast(@constCast(typ))));
     cf.CFRelease(@ptrCast(val));
     cf.CFRelease(@ptrCast(typ));
-    if (!wrote) return .{ .err = "host: pasteboard refused the string" };
+    if (!wrote) return "host: pasteboard refused the string";
     const kd = CGEventCreateKeyboardEvent(null, 9, true); // 'v'
     const ku = CGEventCreateKeyboardEvent(null, 9, false);
-    if (kd == null or ku == null) return .{ .err = "host: CGEventCreateKeyboardEvent returned null" };
+    if (kd == null or ku == null) return "host: CGEventCreateKeyboardEvent returned null";
     CGEventSetFlags(kd, 0x100000); // kCGEventFlagMaskCommand
     CGEventSetFlags(ku, 0x100000);
     CGEventPost(0, kd); // kCGHIDEventTap
     CGEventPost(0, ku);
     cf.CFRelease(kd);
     cf.CFRelease(ku);
+    return null;
+}
+
+~proc paste.text|zig {
+    if (pasteTextProc(text)) |e| return .{ .err = e };
     return .{ .ok = .{} };
 }
 
@@ -1312,5 +1317,17 @@ extern fn CGEventPost(tap: u32, ev: Id) void;
         _ = f.write(buf[0 .. chunk * 4]) catch return .{ .err = "host: dump write failed" };
         wrote += chunk;
     }
+    return .{ .ok = .{} };
+}
+
+// Paste straight from a *String handle — borrows flow down to the
+// consumer, never up through a `->` return (KORU095). Reads the std
+// string's `.data` — the layout contract with koru_std String.
+~pub tor paste.string { s: *std/string:String<view|instance> }
+| ok
+| err string
+
+~proc paste.string|zig {
+    if (pasteTextProc(s.data)) |e| return .{ .err = e };
     return .{ .ok = .{} };
 }
