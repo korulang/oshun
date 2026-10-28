@@ -1723,6 +1723,43 @@ fn buildPipelines(device: Id) error{
     // shift then snap back each step.
     send1(void, bool, wobj, sel("setPreservesContentDuringLiveResize:"), false);
 
+    const wc = windowCore(wobj, width, height);
+    const w = switch (wc) {
+        .win => |p| p,
+        .err => |e| {
+            send(void, wobj, sel("release"));
+            return .{ .err = e };
+        },
+    };
+
+    send1(void, Id, wobj, sel("makeKeyAndOrderFront:"), @as(Id, null));
+    send1(void, bool, app, sel("activateIgnoringOtherApps:"), true);
+    // First responder only sticks on an onscreen window — ordering in resets
+    // it, so this must come after orderFront, not beside content-view setup.
+    const view = send(Id, wobj, sel("contentView"));
+    _ = send1(bool, Id, wobj, sel("makeFirstResponder:"), view);
+
+    // Resize notifications post per drag step of a live resize — the view
+    // observes them so impWindowResized can draw inside AppKit's tracking
+    // loop instead of stretching until mouse-up.
+    const nc = send(Id, cls("NSNotificationCenter"), sel("defaultCenter"));
+    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
+        view, sel("windowResized:"), NSWindowDidResizeNotification, wobj);
+    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
+        view, sel("liveStart:"), NSWindowWillStartLiveResizeNotification, wobj);
+    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
+        view, sel("liveEnd:"), NSWindowDidEndLiveResizeNotification, wobj);
+
+    return .{ .win = w };
+}
+
+const WcResult = union(enum) { win: *Window, err: []const u8 };
+
+// The surface half of every window kind: Metal device + layer, the
+// KoruMetalView content view, command queue, pipelines, and the token.
+// Chrome (policy, title bar, ordering, responders, observers) is the
+// caller's — window.open wants Regular+key, window.overlay wants neither.
+fn windowCore(wobj: Id, width: i32, height: i32) WcResult {
     const device = MTLCreateSystemDefaultDevice();
     if (device == null) {
         return .{ .err = "metal: MTLCreateSystemDefaultDevice returned null" };
@@ -1756,10 +1793,14 @@ fn buildPipelines(device: Id) error{
     const view_cls = ensureViewClass() orelse {
         return .{ .err = "metal: KoruMetalView class registration failed" };
     };
+    const vrect = NSRect{
+        .origin = .{ .x = 0, .y = 0 },
+        .size = .{ .width = @floatFromInt(width), .height = @floatFromInt(height) },
+    };
     const view = send1(
         Id, NSRect,
         send(Id, @as(Id, @ptrCast(view_cls)), sel("alloc")),
-        sel("initWithFrame:"), rect,
+        sel("initWithFrame:"), vrect,
     );
     send1(void, Id, wobj, sel("setContentView:"), view);
     send1(void, Id, view, sel("setLayer:"), layer);
@@ -1788,26 +1829,9 @@ fn buildPipelines(device: Id) error{
     // alive; window.close sends the matching release.
     send1(void, bool, wobj, sel("setReleasedWhenClosed:"), false);
 
-    send1(void, Id, wobj, sel("makeKeyAndOrderFront:"), @as(Id, null));
-    send1(void, bool, app, sel("activateIgnoringOtherApps:"), true);
-    // First responder only sticks on an onscreen window — ordering in resets
-    // it, so this must come after orderFront, not beside content-view setup.
-    _ = send1(bool, Id, wobj, sel("makeFirstResponder:"), view);
-
-    // Resize notifications post per drag step of a live resize — the view
-    // observes them so impWindowResized can draw inside AppKit's tracking
-    // loop instead of stretching until mouse-up.
-    const nc = send(Id, cls("NSNotificationCenter"), sel("defaultCenter"));
-    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
-        view, sel("windowResized:"), NSWindowDidResizeNotification, wobj);
-    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
-        view, sel("liveStart:"), NSWindowWillStartLiveResizeNotification, wobj);
-    send4(void, Id, SEL, Id, Id, nc, sel("addObserver:selector:name:object:"),
-        view, sel("liveEnd:"), NSWindowDidEndLiveResizeNotification, wobj);
-
     const w = std.heap.page_allocator.create(Window) catch @panic("metal: OOM allocating Window token");
     w.* = Window{
-        .app = app,
+        .app = H.ensureApp(),
         .win = wobj,
         .layer = layer,
         .device = device,
@@ -1828,6 +1852,101 @@ fn buildPipelines(device: Id) error{
     };
     live_win = w;
     return .{ .win = w };
+}
+
+// The dictation pill's home: centered horizontally on the main screen,
+// 16% of its height up from the bottom edge. Recomputed at every show so
+// the overlay follows the display that currently owns focus.
+fn overlayOrigin(width: f64, height: f64) NSPoint {
+    _ = height; // the anchor is screen-relative — pill height doesn't enter it
+    var p = NSPoint{ .x = 0, .y = 120.0 };
+    const screen = send(Id, cls("NSScreen"), sel("mainScreen"));
+    if (screen != null) {
+        const sf = send(NSRect, screen, sel("frame"));
+        p.x = sf.origin.x + (sf.size.width - width) / 2.0;
+        p.y = sf.origin.y + sf.size.height * 0.16;
+    }
+    return p;
+}
+
+// A borderless, floating, click-through panel — the overlay kind. It mints
+// the same *Window<opened!> token as window.open, so frames/draw.*/close all
+// work unchanged; what differs is the chrome:
+//
+//   - policy-neutral: no activateRegular, so an Accessory tray agent stays
+//     an agent (the dictation app lives in the menu bar, not the dock)
+//   - starts HIDDEN — window.show orders it in, window.hide orders it out;
+//     a hotkey's show→frames→hide cycle is the summon idiom
+//   - floats (NSFloatingWindowLevel) above normal windows, never steals key
+//     status (borderless windows can't be key), ignores mouse events —
+//     display chrome, not an interaction surface
+//   - transparent NSWindow over a rounded, masked CAMetalLayer — `radius`
+//     is the pill corner in points
+//
+// `frames` exits `| done` when the window stops being visible — on an
+// overlay that means hide() as surely as close(), and the optional `!close`
+// arm fires for either; a dictation app treats it as "surface dismissed".
+~pub tor window.overlay { width: i32, height: i32, radius: f64 }
+| win *Window<opened!>
+| err string
+
+~proc window.overlay|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    _ = H.ensureApp(); // sharedApplication only — no policy, no menu bar claim
+
+    const fw: f64 = @floatFromInt(width);
+    const fh: f64 = @floatFromInt(height);
+    const rect = NSRect{
+        .origin = overlayOrigin(fw, fh),
+        .size = .{ .width = fw, .height = fh },
+    };
+    // styleMask 0 = NSWindowStyleMaskBorderless.
+    const wobj = send4(
+        Id, NSRect, u64, u64, bool,
+        send(Id, cls("NSWindow"), sel("alloc")),
+        sel("initWithContentRect:styleMask:backing:defer:"),
+        rect, 0, 2, false,
+    );
+    if (wobj == null) {
+        return .{ .err = "metal: NSWindow init failed" };
+    }
+    send1(void, i64, wobj, sel("setLevel:"), 3); // NSFloatingWindowLevel
+    send1(void, bool, wobj, sel("setOpaque:"), false);
+    send1(void, Id, wobj, sel("setBackgroundColor:"), send(Id, cls("NSColor"), sel("clearColor")));
+    send1(void, bool, wobj, sel("setHasShadow:"), true);
+    send1(void, bool, wobj, sel("setIgnoresMouseEvents:"), true);
+    send1(void, bool, wobj, sel("setHidesOnDeactivate:"), false);
+
+    const wc = windowCore(wobj, width, height);
+    const w = switch (wc) {
+        .win => |p| p,
+        .err => |e| {
+            send(void, wobj, sel("release"));
+            return .{ .err = e };
+        },
+    };
+    send1(void, bool, w.layer, sel("setOpaque:"), false);
+    send1(void, f64, w.layer, sel("setCornerRadius:"), radius);
+    send1(void, bool, w.layer, sel("setMasksToBounds:"), true);
+    return .{ .win = w };
+}
+
+// Order the overlay in, recentered on the current main screen — orderFront
+// alone never activates the app or takes key status, so the user's focus
+// stays in the app they were dictating into.
+~pub tor window.show { win: *Window<opened|active> }
+~proc window.show|zig {
+    const wf = send(NSRect, win.win, sel("frame"));
+    send1(void, NSPoint, win.win, sel("setFrameOrigin:"), overlayOrigin(wf.size.width, wf.size.height));
+    send1(void, Id, win.win, sel("orderFront:"), @as(Id, null));
+}
+
+// Order the overlay out — the token lives on; the next show()+frames cycle
+// reuses it. frames sees isVisible==false and exits `| done`.
+~pub tor window.hide { win: *Window<opened|active> }
+~proc window.hide|zig {
+    send1(void, Id, win.win, sel("orderOut:"), @as(Id, null));
 }
 
 // The frame loop — the `opened -> active` transition, same bracket shape as
