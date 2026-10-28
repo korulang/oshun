@@ -1085,13 +1085,27 @@ var mic_head: usize = 0; // read pos
 var mic_tail: usize = 0; // write pos
 var mic_rate: f64 = 0;
 
+// SPSC ring: writer is CoreAudio's real-time thread (micRenderCb), readers
+// are mic.read/level/dump on the main thread. head/tail MUST be atomic — a
+// torn update stalls the meter while audio flows and serves stale samples
+// on drain. Tail is release-stored AFTER the samples so readers never see
+// a slot before its data lands; head moves only on reader threads.
 fn micRingWrite(src: [*]const f32, n: usize) void {
+    var tail = @atomicLoad(usize, &mic_tail, .acquire);
+    const head = @atomicLoad(usize, &mic_head, .acquire);
     for (0..n) |i| {
-        const next = (mic_tail + 1) % MIC_RING_CAP;
-        if (next == mic_head) return; // full: drop oldest-position semantics = drop new
-        mic_ring[mic_tail] = src[i];
-        mic_tail = next;
+        const next = (tail + 1) % MIC_RING_CAP;
+        if (next == head) break; // full — drop new
+        mic_ring[tail] = src[i];
+        tail = next;
     }
+    @atomicStore(usize, &mic_tail, tail, .release);
+}
+
+fn micAvail() usize {
+    const head = @atomicLoad(usize, &mic_head, .acquire);
+    const tail = @atomicLoad(usize, &mic_tail, .acquire);
+    return if (tail >= head) tail - head else MIC_RING_CAP - head + tail;
 }
 
 var mic_unit: Id = null;
@@ -1186,10 +1200,11 @@ pub const Mic = struct { unit: Id };
     var n: usize = @intCast(@max(0, @min(window, 16000)));
     var acc: f64 = 0;
     var count: f64 = 0;
-    var i = mic_tail;
+    var i = @atomicLoad(usize, &mic_tail, .acquire);
+    const head = @atomicLoad(usize, &mic_head, .acquire);
     while (n > 0) : (n -= 1) {
         i = (i + MIC_RING_CAP - 1) % MIC_RING_CAP;
-        if (i == mic_head) break;
+        if (i == head) break;
         const s = mic_ring[i];
         acc += s * s;
         count += 1;
@@ -1207,17 +1222,17 @@ pub const Mic = struct { unit: Id };
     _ = mic;
     const cap: usize = @intCast(@max(0, max));
     var n: usize = 0;
-    var avail: usize = 0;
-    if (mic_tail >= mic_head) avail = mic_tail - mic_head else avail = MIC_RING_CAP - mic_head + mic_tail;
+    const avail = micAvail();
     n = @min(cap, avail);
     if (n == 0) return .{ .empty = .{} };
     const out = koru_allocator().alloc(u8, n * 4) catch @panic("host: OOM");
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
-        const s = mic_ring[mic_head];
-        mic_head = (mic_head + 1) % MIC_RING_CAP;
+    var head = @atomicLoad(usize, &mic_head, .acquire);
+    for (0..n) |i| {
+        const s = mic_ring[head];
+        head = (head + 1) % MIC_RING_CAP;
         std.mem.writeInt(u32, out[i * 4 ..][0..4], @as(u32, @bitCast(s)), .little);
     }
+    @atomicStore(usize, &mic_head, head, .release);
     return .{ .ok = out };
 }
 
@@ -1301,8 +1316,7 @@ fn pasteTextProc(text: []const u8) ?[]const u8 {
 ~proc mic.dump|zig {
     _ = mic;
     const cap: usize = @intCast(@max(0, max));
-    var avail: usize = 0;
-    if (mic_tail >= mic_head) avail = mic_tail - mic_head else avail = MIC_RING_CAP - mic_head + mic_tail;
+    const avail = micAvail();
     const n = @min(cap, avail);
     var f = std.fs.cwd().createFile(path, .{}) catch return .{ .err = "host: dump file create failed" };
     defer f.close();
