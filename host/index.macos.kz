@@ -22,6 +22,7 @@
     exe.linkFramework("Cocoa");
     exe.linkFramework("CoreFoundation");
     exe.linkFramework("UserNotifications");
+    exe.linkFramework("Carbon");
 }
 
 const std = @import("std");
@@ -178,9 +179,19 @@ pub const MenuActionData = struct {
     action: []const u8,
 };
 
+// A global-hotkey event — the watched key/mods echoed back so `when`
+// guards match on them, `down` 1 on press / 0 on release. Press AND
+// release both land: hold-to-talk is the load this exists for.
+pub const HotkeyData = struct {
+    key: i64,
+    mods: i64,
+    down: i64,
+};
+
 pub const HostEvent = union(enum) {
     tray: TrayActionData,
     menu: MenuActionData,
+    hotkey: HotkeyData,
 };
 
 var ev_buf: [64]HostEvent = undefined;
@@ -199,6 +210,7 @@ fn pushEvent(e: HostEvent, action_src: []const u8) void {
     switch (ev) {
         .tray => |*t| t.action = ev_actions[ev_tail][0..n],
         .menu => |*m| m.action = ev_actions[ev_tail][0..n],
+        .hotkey => {},
     }
     ev_buf[ev_tail] = ev;
     ev_tail = next;
@@ -210,6 +222,10 @@ fn trayPushAction(tray: i64, tag: i64, action: []const u8) void {
 
 fn menuPushAction(tag: i64, action: []const u8) void {
     pushEvent(.{ .menu = .{ .tag = tag, .action = &.{} } }, action);
+}
+
+fn pushHotkey(d: HotkeyData) void {
+    pushEvent(.{ .hotkey = d }, "");
 }
 
 pub fn popEvent() ?HostEvent {
@@ -821,6 +837,7 @@ pub extern fn CFRunLoopWakeUp(rl: Id) callconv(.c) void;
 const HostArms = struct {
     tray: *const fn (TrayActionData) void,
     menu: *const fn (MenuActionData) void,
+    hotkey: *const fn (HotkeyData) void,
 };
 
 var host_arms: ?HostArms = null;
@@ -836,6 +853,7 @@ fn impHostTick(recv: Id, _s: SEL, timer: Id) callconv(.c) void {
             switch (hev) {
                 .tray => |td| arms.tray(td),
                 .menu => |md| arms.menu(md),
+                .hotkey => |hk| arms.hotkey(hk),
             }
         }
     }
@@ -885,12 +903,13 @@ fn ensureHostTickTarget() ?Id {
 ~pub tor host.run { count: ?i32 }
 ! ?tray-action libs/host:TrayActionData
 ! ?menu-action libs/host:MenuActionData
+! ?hotkey libs/host:HotkeyData
 | done
 
 ~proc host.run|zig {
     const __cap = @as(?i32, count) orelse 2147483647;
     const app = $mod.ensureApp();
-    $mod.host_arms = .{ .tray = tray_action, .menu = menu_action };
+    $mod.host_arms = .{ .tray = tray_action, .menu = menu_action, .hotkey = hotkey };
     $mod.host_app = app;
     $mod.host_ticks = 0;
     $mod.host_cap = __cap;
@@ -914,4 +933,109 @@ fn ensureHostTickTarget() ?Id {
 
 ~proc quit|zig {
     should_quit = true;
+}
+
+// ============================================================================
+// Global hotkeys — Carbon RegisterEventHotKey, the one global-key API that
+// needs NO Accessibility / Input-Monitoring grant (6digit-voice's
+// hotkey-watch.swift precedent). The handler is a plain C function pointer
+// like every IMP here: it pushes into the host ring; both pumps drain it —
+// press AND release land, so hold-to-talk is the shape this exists for.
+// Modifier-only keys (fn/globe) are NOT expressible as Carbon hotkeys —
+// they want an NSEvent flagsChanged or IOHID path, a different verb.
+// ============================================================================
+
+const EventTypeSpec = extern struct { eventClass: u32, eventKind: u32 };
+const EventHotKeyID = extern struct { signature: u32, id: u32 };
+const EventHotKeyRef = Id;
+
+extern fn RegisterEventHotKey(code: u32, mods: u32, hkid: EventHotKeyID, target: Id, options: u32, ref: ?*EventHotKeyRef) i32;
+extern fn UnregisterEventHotKey(ref: EventHotKeyRef) i32;
+extern fn InstallEventHandler(target: Id, handler: *const anyopaque, num_types: usize, specs: [*]const EventTypeSpec, user_data: ?*anyopaque, ref: ?*anyopaque) i32;
+extern fn GetApplicationEventTarget() Id;
+extern fn GetEventKind(ev: Id) u32;
+extern fn GetEventParameter(ev: Id, name: u32, dtype: u32, actual: ?*u32, size: usize, actual_size: ?*usize, data: ?*anyopaque) i32;
+
+// kEventClassKeyboard / kEventHotKey{Pressed,Released} / kEventParamDirectObject /
+// typeEventHotKeyID / our registration signature — as FourCharCodes.
+const K_CLASS_KBD: u32 = 0x6B657962;
+const K_HOTKEY_DOWN: u32 = 5;
+const K_PARAM_DIRECT: u32 = 0x2D2D2D2D;
+const K_TYPE_HOTKEY_ID: u32 = 0x686B6964;
+const K_SIG: u32 = 0x4B4F5255; // 'KORU'
+
+const MAX_HOTKEYS = 8;
+var hotkey_refs: [MAX_HOTKEYS]EventHotKeyRef = .{null} ** MAX_HOTKEYS;
+var hotkey_keys: [MAX_HOTKEYS]i64 = .{0} ** MAX_HOTKEYS;
+var hotkey_mods: [MAX_HOTKEYS]i64 = .{0} ** MAX_HOTKEYS;
+var hotkey_count: usize = 0;
+var hotkey_handler_installed = false;
+
+fn hotkeyHandler(_: Id, ev: Id, _: ?*anyopaque) callconv(.c) i32 {
+    var hkid: EventHotKeyID = std.mem.zeroes(EventHotKeyID);
+    _ = GetEventParameter(ev, K_PARAM_DIRECT, K_TYPE_HOTKEY_ID, null, @sizeOf(EventHotKeyID), null, &hkid);
+    if (hkid.id == 0 or hkid.id > hotkey_count) return 0;
+    const slot: usize = @intCast(hkid.id - 1);
+    pushHotkey(.{
+        .key = hotkey_keys[slot],
+        .mods = hotkey_mods[slot],
+        .down = if (GetEventKind(ev) == K_HOTKEY_DOWN) 1 else 0,
+    });
+    return 0;
+}
+
+fn ensureHotkeyHandler() bool {
+    if (hotkey_handler_installed) return true;
+    const specs = [_]EventTypeSpec{
+        .{ .eventClass = K_CLASS_KBD, .eventKind = K_HOTKEY_DOWN },
+        .{ .eventClass = K_CLASS_KBD, .eventKind = 6 }, // kEventHotKeyReleased
+    };
+    if (InstallEventHandler(GetApplicationEventTarget(), @ptrCast(&hotkeyHandler), specs.len, &specs, null, null) != 0) return false;
+    hotkey_handler_installed = true;
+    return true;
+}
+
+pub const Hotkey = struct { slot: usize };
+
+// Watch one global hotkey — key is a mac virtual keycode, mods a Carbon
+// mask (cmd 256 | shift 512 | option 2048 | control 4096). Events land on
+// the `! hotkey` arm of whichever pump is running.
+~pub tor hotkey.watch { key: i64, mods: i64 }
+| watching *Hotkey<watching!>
+| err string
+
+~proc hotkey.watch|zig {
+    if (!ensureHotkeyHandler()) return .{ .err = "host: InstallEventHandler failed" };
+    if (hotkey_count >= MAX_HOTKEYS) return .{ .err = "host: hotkey table full" };
+    const slot = hotkey_count;
+    var ref: EventHotKeyRef = null;
+    const st = RegisterEventHotKey(
+        @intCast(key), @intCast(mods),
+        .{ .signature = K_SIG, .id = @intCast(slot + 1) },
+        GetApplicationEventTarget(), 0, &ref,
+    );
+    if (st != 0 or ref == null) return .{ .err = "host: RegisterEventHotKey failed" };
+    hotkey_refs[slot] = ref;
+    hotkey_keys[slot] = key;
+    hotkey_mods[slot] = mods;
+    hotkey_count += 1;
+    const hk = std.heap.page_allocator.create(Hotkey) catch @panic("host: OOM");
+    hk.* = .{ .slot = slot };
+    return .{ .watching = hk };
+}
+
+// Stop watching — discharges the token.
+~pub tor hotkey.unwatch { hk: *Hotkey<!watching> }
+~proc hotkey.unwatch|zig {
+    if (hotkey_refs[hk.slot]) |r| _ = UnregisterEventHotKey(r);
+    hotkey_refs[hk.slot] = null;
+    std.heap.page_allocator.destroy(hk);
+}
+
+// Push a synthetic hotkey event — same shape as tray.action: exercises
+// ring -> arm dispatch without a human press. Only a keyboard can prove
+// the Carbon half; the status code in watch is its receipt.
+~pub tor hotkey.action { key: i64, mods: i64, down: i64 }
+~proc hotkey.action|zig {
+    pushHotkey(.{ .key = key, .mods = mods, .down = down });
 }

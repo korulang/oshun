@@ -1972,6 +1972,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 ! ?remote-button libs/metal:RemoteData
 ! ?tray-action libs/host:TrayActionData
 ! ?menu-action libs/host:MenuActionData
+! ?hotkey libs/host:HotkeyData
 ! ?close
 | done *Window<active!>
 
@@ -2022,6 +2023,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
             switch (hev) {
                 .tray => |td| tray_action(td),
                 .menu => |md| menu_action(md),
+                .hotkey => |hk| hotkey(hk),
             }
         }
         if ($mod.H.should_quit) break;
