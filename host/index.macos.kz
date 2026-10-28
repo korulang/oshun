@@ -846,11 +846,16 @@ var host_arms: ?HostArms = null;
 var host_ticks: i32 = 0;
 var host_cap: i32 = 0;
 var host_app: Id = null;
+// Pump arbitration: a nested pump (frames running inside a host.run arm)
+// owns the drain while it runs — without this the host tick steals events
+// bound for the active pump's arms.
+pub var drain_paused: bool = false;
 
 fn impHostTick(recv: Id, _s: SEL, timer: Id) callconv(.c) void {
     _ = recv;
     _ = _s;
-    while (popEvent()) |hev| {
+    while (!drain_paused) {
+        const hev = popEvent() orelse break;
         if (host_arms) |arms| {
             switch (hev) {
                 .tray => |td| arms.tray(td),

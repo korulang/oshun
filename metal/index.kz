@@ -1982,6 +1982,10 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
     // sendEvent:, so the windowResized: IMP draws through frame_cb instead.
     $mod.frame_cb = frame;
     $mod.hidEnsure();
+    // While this pump owns the thread, the host tick's drain defers — a
+    // nested frames is the ACTIVE pump and its arms get the events.
+    $mod.H.drain_paused = true;
+    defer $mod.H.drain_paused = false;
     var i: i32 = 0;
     while (i < __cap) : (i += 1) {
         const pool = $mod.objc_autoreleasePoolPush();
