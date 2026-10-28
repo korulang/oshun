@@ -1285,3 +1285,32 @@ extern fn CGEventPost(tap: u32, ev: Id) void;
     const duped = koru_allocator().dupe(u8, std.mem.sliceTo(&buf, 0)) catch @panic("host: OOM");
     return .{ .ok = duped };
 }
+
+// Forensics: write up to `max` drained samples to `path` as f32le — the
+// "is it zeros?" oracle without a WAV round-trip.
+~pub tor mic.dump { mic: *Mic<live>, path: string<*>, max: i64 }
+| ok
+| err string
+
+~proc mic.dump|zig {
+    _ = mic;
+    const cap: usize = @intCast(@max(0, max));
+    var avail: usize = 0;
+    if (mic_tail >= mic_head) avail = mic_tail - mic_head else avail = MIC_RING_CAP - mic_head + mic_tail;
+    const n = @min(cap, avail);
+    var f = std.fs.cwd().createFile(path, .{}) catch return .{ .err = "host: dump file create failed" };
+    defer f.close();
+    var buf: [65536]u8 = undefined;
+    var wrote: usize = 0;
+    while (wrote < n) {
+        const chunk = @min(n - wrote, buf.len / 4);
+        for (0..chunk) |i| {
+            const s = mic_ring[mic_head];
+            mic_head = (mic_head + 1) % MIC_RING_CAP;
+            std.mem.writeInt(u32, buf[i * 4 ..][0..4], @as(u32, @bitCast(s)), .little);
+        }
+        _ = f.write(buf[0 .. chunk * 4]) catch return .{ .err = "host: dump write failed" };
+        wrote += chunk;
+    }
+    return .{ .ok = .{} };
+}

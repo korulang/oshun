@@ -1981,6 +1981,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
     // Live-resize path: during an edge drag this loop is parked inside
     // sendEvent:, so the windowResized: IMP draws through frame_cb instead.
     $mod.frame_cb = frame;
+    defer $mod.frame_cb = null;
     $mod.hidEnsure();
     // While this pump owns the thread, the host tick's drain defers — a
     // nested frames is the ACTIVE pump and its arms get the events.
@@ -2092,6 +2093,9 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 ~proc window.close|zig {
     const pool = objc_autoreleasePoolPush();
     defer objc_autoreleasePoolPop(pool);
+    // The live_window singleton must not outlive its token — a view IMP
+    // firing on the NEXT window would draw through a freed Window.
+    if (live_win == win) live_win = null;
     send(void, win.win, sel("close"));
     send(void, win.win, sel("release"));
     if (win.scene_tex != null) send(void, win.scene_tex, sel("release"));

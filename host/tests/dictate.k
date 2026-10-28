@@ -1,6 +1,6 @@
 // Dictate spike — the summon loop end to end in one file:
 //   needle.load + mic.start + two hotkey watches -> host.run idles ->
-//   Ctrl+Option+Space DOWN mints an overlay, shows it, and runs frames
+//   Ctrl+Option+Period DOWN mints an overlay, shows it, and runs frames
 //   (nested pump; host tick defers) -> each frame drains mic.read into
 //   needle stream.process and draws the live RMS level -> key UP hides
 //   -> frames exits -> stream.stop's final JSON prints + pastes ->
@@ -19,10 +19,10 @@ import std/io
 
 libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle.cact")
 | ready eng |> libs/host:mic.start()
-    | live m |> libs/host:hotkey.watch(key: 49, mods: 6144)
+    | live m |> libs/host:hotkey.watch(key: 47, mods: 6144)
         | watching hk1 |> libs/host:hotkey.watch(key: 12, mods: 6144)
             | watching hk2 |> libs/host:host.run(count: 9999999)
-                ! hotkey h when h.key == 49 and h.down == 1
+                ! hotkey h when h.key == 47 and h.down == 1
                     |> libs/metal:window.overlay(width: 360, height: 72, radius: 20.0)
                         | win ov |> libs/metal:window.show(win: ov)
                             |> libs/metal:window.clear.color(win: ov, r: 0.07, g: 0.06, b: 0.11)
@@ -36,7 +36,7 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
                                         | empty
                                     |> libs/host:mic.level(mic: m, window: 800) : lv
                                     |> libs/metal:draw.rect(f, x: 20.0, y: 26.0, w: lv * 4000.0, h: 20.0, r: 0.4, g: 0.9, b: 0.5, a: 1.0)
-                                ! hotkey h2 when h2.key == 49 and h2.down == 0
+                                ! hotkey h2 when h2.key == 47 and h2.down == 0
                                     |> libs/metal:window.hide(win: ov)
                                 | done ov2 |> libs/needle:stream.stop(eng)
                                     | ok json |> std/io:print.ln("final: {{ json:s }}")
