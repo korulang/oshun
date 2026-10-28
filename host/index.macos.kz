@@ -24,6 +24,7 @@
     exe.linkFramework("UserNotifications");
     exe.linkFramework("Carbon");
     exe.linkFramework("AudioToolbox");
+    exe.linkFramework("CoreGraphics");
 }
 
 const std = @import("std");
@@ -1212,4 +1213,70 @@ pub const Mic = struct { unit: Id };
         std.mem.writeInt(u32, out[i * 4 ..][0..4], @as(u32, @bitCast(s)), .little);
     }
     return .{ .ok = out };
+}
+
+// ============================================================================
+// Paste delivery — the delivery half of dictation: NSPasteboard + a
+// synthesized Cmd+V into the focused app (unmute-dictation's
+// key-poster.swift pattern, native). CGEventPost needs an Accessibility /
+// Input-Monitoring grant for the posting process and fails SILENTLY when
+// denied — the pasteboard write is the verifiable half (paste.read),
+// the keystroke's receipt is a focused text field.
+// ============================================================================
+
+extern fn CGEventCreateKeyboardEvent(src: Id, keycode: u16, down: bool) Id;
+extern fn CGEventSetFlags(ev: Id, flags: u64) void;
+extern fn CGEventPost(tap: u32, ev: Id) void;
+
+// Write `text` to the clipboard, then post Cmd+V at the focused app.
+// The previous clipboard is NOT restored — full typed-content restore is
+// a later verb; today the clipboard ends holding the transcript.
+~pub tor paste.text { text: string<*> }
+| ok
+| err string
+
+~proc paste.text|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    const pb = send(Id, cls("NSPasteboard"), sel("generalPasteboard"));
+    send(void, pb, sel("clearContents"));
+    const zbuf = std.heap.page_allocator.allocSentinel(u8, text.len, 0) catch @panic("host: OOM");
+    defer std.heap.page_allocator.free(zbuf);
+    @memcpy(zbuf, text);
+    const val = cf.CFStringCreateWithCString(null, @as([*:0]const u8, @ptrCast(zbuf.ptr)), cf.kCFStringEncodingUTF8);
+    const typ = cf.CFStringCreateWithCString(null, "public.utf8-plain-text", cf.kCFStringEncodingUTF8);
+    const wrote = send2(bool, Id, Id, pb, sel("setString:forType:"), @as(Id, @ptrCast(@constCast(val))), @as(Id, @ptrCast(@constCast(typ))));
+    cf.CFRelease(@ptrCast(val));
+    cf.CFRelease(@ptrCast(typ));
+    if (!wrote) return .{ .err = "host: pasteboard refused the string" };
+    const kd = CGEventCreateKeyboardEvent(null, 9, true); // 'v'
+    const ku = CGEventCreateKeyboardEvent(null, 9, false);
+    if (kd == null or ku == null) return .{ .err = "host: CGEventCreateKeyboardEvent returned null" };
+    CGEventSetFlags(kd, 0x100000); // kCGEventFlagMaskCommand
+    CGEventSetFlags(ku, 0x100000);
+    CGEventPost(0, kd); // kCGHIDEventTap
+    CGEventPost(0, ku);
+    cf.CFRelease(kd);
+    cf.CFRelease(ku);
+    return .{ .ok = .{} };
+}
+
+// Read the clipboard's plain text — makes the write half verifiable
+// without a human at a text field.
+~pub tor paste.read {}
+| ok string<std/io:allocated!>
+| empty
+
+~proc paste.read|zig {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+    const pb = send(Id, cls("NSPasteboard"), sel("generalPasteboard"));
+    const typ = cf.CFStringCreateWithCString(null, "public.utf8-plain-text", cf.kCFStringEncodingUTF8);
+    const s = send1(Id, Id, pb, sel("stringForType:"), @as(Id, @ptrCast(@constCast(typ))));
+    cf.CFRelease(@ptrCast(typ));
+    if (s == null) return .{ .empty = .{} };
+    var buf: [8192]u8 = undefined;
+    if (!CFStringGetCString(s, &buf, buf.len, cf.kCFStringEncodingUTF8)) return .{ .empty = .{} };
+    const duped = koru_allocator().dupe(u8, std.mem.sliceTo(&buf, 0)) catch @panic("host: OOM");
+    return .{ .ok = duped };
 }
