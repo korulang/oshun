@@ -23,6 +23,7 @@
     exe.linkFramework("CoreFoundation");
     exe.linkFramework("UserNotifications");
     exe.linkFramework("Carbon");
+    exe.linkFramework("AudioToolbox");
 }
 
 const std = @import("std");
@@ -1038,4 +1039,177 @@ pub const Hotkey = struct { slot: usize };
 ~pub tor hotkey.action { key: i64, mods: i64, down: i64 }
 ~proc hotkey.action|zig {
     pushHotkey(.{ .key = key, .mods = mods, .down = down });
+}
+
+// ============================================================================
+// Mic capture — VoiceProcessingIO AudioUnit (built-in AEC/voice isolation),
+// plain C render callback, no blocks, no Swift. The unit negotiates 16kHz
+// float32 mono on the input element's output edge — whistle's exact sample
+// contract — and fails loudly at start if the device refuses it (never a
+// silently-wrong-rate stream). Captured samples ride one ring the caller
+// drains via mic.read; mic.level is the RMS of the recent tail, which is
+// the honest source for a live waveform — the surface draws real energy,
+// never a synthesized wave.
+// ============================================================================
+
+const ACD = extern struct { ctype: u32, subtype: u32, mfr: u32, flags: u32, flags_mask: u32 };
+const ASBD = extern struct {
+    rate: f64, fmt: u32, flags: u32, bpp: u32, fpp: u32,
+    bpf: u32, chans: u32, bits: u32, reserved: u32,
+};
+const AudioBuf = extern struct { chans: u32, bytes: u32, data: ?*anyopaque };
+const AudioBufList = extern struct { count: u32, bufs: [1]AudioBuf };
+const RenderCB = extern struct { proc: *const anyopaque, refcon: ?*anyopaque };
+
+extern fn AudioComponentFindNext(comp: Id, desc: *const ACD) Id;
+extern fn AudioComponentInstanceNew(comp: Id, out: *Id) i32;
+extern fn AudioUnitSetProperty(u: Id, prop: u32, scope: u32, elem: u32, data: ?*const anyopaque, size: u32) i32;
+extern fn AudioUnitGetProperty(u: Id, prop: u32, scope: u32, elem: u32, data: ?*anyopaque, size: *u32) i32;
+extern fn AudioUnitInitialize(u: Id) i32;
+extern fn AudioUnitUninitialize(u: Id) i32;
+extern fn AudioOutputUnitStart(u: Id) i32;
+extern fn AudioOutputUnitStop(u: Id) i32;
+extern fn AudioComponentInstanceDispose(u: Id) i32;
+extern fn AudioUnitRender(u: Id, flags: *u32, ts: ?*const anyopaque, bus: u32, frames: u32, data: ?*AudioBufList) i32;
+
+const MIC_RING_CAP: usize = 16000 * 30; // 30s of f32 mono
+var mic_ring: [MIC_RING_CAP]f32 = undefined;
+var mic_head: usize = 0; // read pos
+var mic_tail: usize = 0; // write pos
+var mic_rate: f64 = 0;
+
+fn micRingWrite(src: [*]const f32, n: usize) void {
+    for (0..n) |i| {
+        const next = (mic_tail + 1) % MIC_RING_CAP;
+        if (next == mic_head) return; // full: drop oldest-position semantics = drop new
+        mic_ring[mic_tail] = src[i];
+        mic_tail = next;
+    }
+}
+
+var mic_unit: Id = null;
+var mic_pull_buf: [4096 * 4]u8 = undefined;
+
+// Pull-model capture: SetInputCallback is notification-only — nothing
+// renders means nothing pulls input through. The render callback sits on
+// the output element, calls AudioUnitRender on bus 1 to pull the captured
+// samples into the ring, and writes silence to the speakers (the output
+// half runs only to keep the VPIO pair alive).
+fn micRenderCb(_: ?*anyopaque, flags: *u32, ts: ?*const anyopaque, _: u32, frames: u32, data: ?*AudioBufList) callconv(.c) i32 {
+    var list = AudioBufList{ .count = 1, .bufs = .{.{ .chans = 1, .bytes = @min(frames * 4, mic_pull_buf.len), .data = @ptrCast(&mic_pull_buf) }} };
+    _ = AudioUnitRender(mic_unit, flags, ts, 1, frames, &list);
+    const p: [*]const f32 = @ptrCast(@alignCast(@as(?*anyopaque, @ptrCast(&mic_pull_buf))));
+    micRingWrite(p, @min(@as(usize, frames), list.bufs[0].bytes / 4));
+    if (data) |d| {
+        // AudioBufferList declares mBuffers[1] but carries `count` — walk it
+        // as a many-item pointer and silence every buffer.
+        const bs: [*]AudioBuf = @ptrCast(&d.bufs);
+        for (0..d.count) |bi| {
+            const b = bs[bi];
+            if (b.data) |ptr| @memset(@as([*]u8, @ptrCast(ptr))[0..b.bytes], 0);
+        }
+    }
+    return 0;
+}
+
+pub const Mic = struct { unit: Id };
+
+// Start capture on the default input — mints the live token.
+// | err = OSStatus*100 + step (OSStatus is already negative; the last two
+// digits name the failing call) — 2=InstanceNew, 3=EnableIO-in, 4/5=
+// StreamFormat set (capture/render edge), 6=StreamFormat get, 7=
+// SetInputCallback, 8=Initialize, 9=Start; -1 no comp, -2 fmt mismatch.
+~pub tor mic.start {}
+| live *Mic<live!>
+| err i32
+
+~proc mic.start|zig {
+    var desc = ACD{ .ctype = 0x61756F75, .subtype = 0x7670696F, .mfr = 0x6170706C, .flags = 0, .flags_mask = 0 };
+    const comp = AudioComponentFindNext(null, &desc);
+    if (comp == null) return .{ .err = -1 };
+    var unit: Id = null;
+    var st = AudioComponentInstanceNew(comp, &unit);
+    if (st != 0) return .{ .err = st * 100 + 2 };
+    var one: u32 = 1;
+    st = AudioUnitSetProperty(unit, 2003, 1, 1, &one, 4); // EnableIO on input elem
+    if (st != 0) return .{ .err = st * 100 + 3 };
+    // VPIO is a paired unit: the output element stays ENABLED (its AEC
+    // subtracts what the Mac plays; Initialize rejects a half-open pair
+    // with InvalidElement, -10875) and BOTH edges carry a stream format —
+    // output-of-input-bus (scope 2 elem 1, delivered capture) and
+    // input-of-output-bus (scope 1 elem 0, the render edge, silent here).
+    var want = ASBD{ .rate = 16000, .fmt = 0x6C70636D, .flags = 5, .bpp = 4, .fpp = 1, .bpf = 4, .chans = 1, .bits = 32, .reserved = 0 };
+    st = AudioUnitSetProperty(unit, 8, 2, 1, &want, @sizeOf(ASBD));
+    if (st != 0) return .{ .err = st * 100 + 4 };
+    st = AudioUnitSetProperty(unit, 8, 1, 0, &want, @sizeOf(ASBD));
+    if (st != 0) return .{ .err = st * 100 + 5 };
+    var got = std.mem.zeroes(ASBD);
+    var got_sz: u32 = @sizeOf(ASBD);
+    st = AudioUnitGetProperty(unit, 8, 2, 1, &got, &got_sz);
+    if (st != 0) return .{ .err = st * 100 + 6 };
+    if (got.rate != 16000 or got.fmt != 0x6C70636D or (got.flags & 1) == 0) return .{ .err = -2 };
+    mic_rate = got.rate;
+    var cb = RenderCB{ .proc = @ptrCast(&micRenderCb), .refcon = null };
+    st = AudioUnitSetProperty(unit, 23, 0, 0, &cb, @sizeOf(RenderCB)); // SetRenderCallback
+    if (st != 0) return .{ .err = st * 100 + 7 };
+    st = AudioUnitInitialize(unit);
+    if (st != 0) return .{ .err = st * 100 + 8 };
+    st = AudioOutputUnitStart(unit);
+    if (st != 0) return .{ .err = st * 100 + 9 };
+    mic_unit = unit;
+    const m = std.heap.page_allocator.create(Mic) catch @panic("host: OOM");
+    m.* = .{ .unit = unit };
+    return .{ .live = m };
+}
+
+// Stop and dispose — discharges the token.
+~pub tor mic.stop { mic: *Mic<!live> }
+~proc mic.stop|zig {
+    _ = AudioOutputUnitStop(mic.unit);
+    _ = AudioUnitUninitialize(mic.unit);
+    _ = AudioComponentInstanceDispose(mic.unit);
+    std.heap.page_allocator.destroy(mic);
+}
+
+// RMS energy of the most recent ring samples — the live-waveform feed.
+~pub tor mic.level { mic: *Mic<live>, window: i64 } -> f64
+
+~proc mic.level|zig {
+    _ = mic;
+    var n: usize = @intCast(@max(0, @min(window, 16000)));
+    var acc: f64 = 0;
+    var count: f64 = 0;
+    var i = mic_tail;
+    while (n > 0) : (n -= 1) {
+        i = (i + MIC_RING_CAP - 1) % MIC_RING_CAP;
+        if (i == mic_head) break;
+        const s = mic_ring[i];
+        acc += s * s;
+        count += 1;
+    }
+    return if (count > 0) @sqrt(acc / count) else 0.0;
+}
+
+// Drain up to `max` ring samples as little-endian f32 bytes — feeds
+// needle stream.process directly.
+~pub tor mic.read { mic: *Mic<live>, max: i64 }
+| ok string<std/io:allocated!>
+| empty
+
+~proc mic.read|zig {
+    _ = mic;
+    const cap: usize = @intCast(@max(0, max));
+    var n: usize = 0;
+    var avail: usize = 0;
+    if (mic_tail >= mic_head) avail = mic_tail - mic_head else avail = MIC_RING_CAP - mic_head + mic_tail;
+    n = @min(cap, avail);
+    if (n == 0) return .{ .empty = .{} };
+    const out = koru_allocator().alloc(u8, n * 4) catch @panic("host: OOM");
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const s = mic_ring[mic_head];
+        mic_head = (mic_head + 1) % MIC_RING_CAP;
+        std.mem.writeInt(u32, out[i * 4 ..][0..4], @as(u32, @bitCast(s)), .little);
+    }
+    return .{ .ok = out };
 }
