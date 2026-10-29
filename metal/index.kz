@@ -2564,7 +2564,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     }
 }
 
-~pub tor draw.text { f: *Frame<frame>, x: f64, y: f64, size: f64, r: f64, g: f64, b: f64, a: f64, text: string }
+~pub tor draw.text { f: *Frame<frame>, x: f64, y: f64, size: f64, r: f64, g: f64, b: f64, a: f64, text: string<*> }
 
 ~proc draw.text|zig {
     pushTextRun(f, x, y, size, 0, r, g, b, a, text);
@@ -2573,7 +2573,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 // One run in a font.load'd face — `font` is the 1-based handle font.load
 // returned. Everything else is draw.text: same line-box origin, same
 // baseline snap, same per-glyph atlas instances.
-~pub tor draw.textface { f: *Frame<frame>, x: f64, y: f64, size: f64, font: i64, r: f64, g: f64, b: f64, a: f64, text: string }
+~pub tor draw.textface { f: *Frame<frame>, x: f64, y: f64, size: f64, font: i64, r: f64, g: f64, b: f64, a: f64, text: string<*> }
 
 ~proc draw.textface|zig {
     pushTextRun(f, x, y, size, font, r, g, b, a, text);
