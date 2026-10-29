@@ -1944,6 +1944,15 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 
 // Order the overlay out — the token lives on; the next show()+frames cycle
 // reuses it. frames sees isVisible==false and exits `| done`.
+// Keep a window on screen after the app deactivates — accessory apps
+// (tray agents) hide their windows when focus leaves unless told not to;
+// the overlay does this inline at mint, the opened window needs a verb.
+~pub tor window.pin { win: *Window<opened|active> }
+~proc window.pin|zig {
+    send1(void, bool, win.win, sel("setHidesOnDeactivate:"), false);
+    send1(void, Id, win.win, sel("orderFront:"), @as(Id, null));
+}
+
 ~pub tor window.hide { win: *Window<opened|active> }
 ~proc window.hide|zig {
     send1(void, Id, win.win, sel("orderOut:"), @as(Id, null));
