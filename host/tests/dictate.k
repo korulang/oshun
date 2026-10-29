@@ -25,6 +25,9 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
         | watching hk1 |> libs/host:hotkey.watch(key: 12, mods: 6144)
             | watching hk2 |> libs/host:host.run(count: 9999999)
                 ! hotkey h when h.key == 47 and h.down == 1
+                    |> libs/host:mic.read(mic: m, max: 480000)
+                        | ok stale |> std/io:free(content: stale)
+                        | empty
                     |> libs/metal:window.overlay(width: 360, height: 72, radius: 20.0)
                         | win ov |> libs/metal:window.show(win: ov)
                             |> libs/metal:window.clear.color(win: ov, r: 0.07, g: 0.06, b: 0.11)
@@ -36,7 +39,8 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
                                     |> libs/metal:window.hide(win: ov)
                                 | done ov2 |> libs/host:mic.read(mic: m, max: 480000)
                                     | ok pcm |> libs/needle:transcribe(eng, pcm, language: "en")
-                                        | ok json |> std/json:get.string(json, key: "text")
+                                        | ok json |> std/io:print.ln("result: {{ json:s }}")
+                                            |> std/json:get.string(json, key: "text")
                                             | ok t |> std/io:print.ln("transcript: {{ t:s }}")
                                                 |> libs/host:paste.text(text: t)
                                                     | ok |> std/io:print.ln("paste: ok")

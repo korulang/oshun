@@ -1092,13 +1092,18 @@ var mic_rate: f64 = 0;
 // a slot before its data lands; head moves only on reader threads.
 fn micRingWrite(src: [*]const f32, n: usize) void {
     var tail = @atomicLoad(usize, &mic_tail, .acquire);
-    const head = @atomicLoad(usize, &mic_head, .acquire);
+    var head = @atomicLoad(usize, &mic_head, .acquire);
     for (0..n) |i| {
         const next = (tail + 1) % MIC_RING_CAP;
-        if (next == head) break; // full — drop new
+        if (next == head) {
+            // overwrite-oldest: idle ambient must never freeze the buffer —
+            // a full ring keeps the most recent audio, not the oldest.
+            head = (head + 1) % MIC_RING_CAP;
+        }
         mic_ring[tail] = src[i];
         tail = next;
     }
+    @atomicStore(usize, &mic_head, head, .release);
     @atomicStore(usize, &mic_tail, tail, .release);
 }
 
