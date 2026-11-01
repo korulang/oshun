@@ -30,6 +30,8 @@ import libs/components/index
 import libs/components/code_codeview
 import libs/components/code_diffview
 import libs/components/code_turnview
+import libs/components/term_termview
+import libs/vt
 import app/omni_img
 import oshun
 import std/args
@@ -44,7 +46,7 @@ std/store:new(world) {
     ic: 0[i64], clipn: 0[i64], r0: 0[i64], r1: 32[i64], icount: 0[i64], live: 0[i64],
     mx: -1.0[i64], my: -1.0[i64], pdown: 0[i64],
     stageh: -1[i64], wavslot: -1[i64], docslot: -1[i64],
-    codeslot: -1[i64], diffslot: -1[i64],
+    codeslot: -1[i64], diffslot: -1[i64], termh: -1[i64], seltork: -1[i64], termsel: -1[i64],
     tex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
 }
 std/store:new(fworld) {
@@ -161,6 +163,8 @@ oshun:component(seed, spec) {
                                 | row _
                             |> std/store:insert(entries) { tx: "turnview", sub: "an agent turn — prompt, verdict, tool", tork: 9 }
                                 | row _
+                            |> std/store:insert(entries) { tx: "term", sub: "ghostty-vt — a live session in a card", tork: 10 }
+                                | row ts |> std/store:stored { world.termsel: ts }
                     // Locate the two minted slots by kind — audio kind 2,
                     // doc kind 0; the handles already came back from
                     // file-open, slots derive from the res arrays.
@@ -176,6 +180,18 @@ oshun:component(seed, spec) {
                                                 | then |> std/store:stored { world.docslot: @as(i64, @intCast(si)) }
                                             |> if (rl == 1 and rk == 0 and rp == "/Users/larsde/src/oshun/metal/tests/silk_live.k")
                                                 | then |> std/store:stored { world.codeslot: @as(i64, @intCast(si)) }
+                    // The terminal session — minted once like the other
+                    // resources: feed-only + canned bytes for the scripted
+                    // twin (pixel-deterministic snaps), a real zsh in live.
+                    |> if (world.frame == 1 and world.live == 0)
+                        | then |> libs/vt:term-open(cols: 60, rows: 16, cmd: "") : th
+                            |> std/store:stored { world.termh: th }
+                            |> libs/vt:term-feed(h: th, bytes: "\x1b[1;32momni\x1b[0m \x1b[90m~/src/oshun\x1b[0m\r\n\x1b[32m$\x1b[0m ls components/\r\ncode_codeview.kz   code_diffview.kz   code_turnview.kz\r\nterm_termview.kz  index.kz\r\n\x1b[32m$\x1b[0m ./gallery term\x1b[90m --live\x1b[0m\r\n\x1b[1mterminal surface armed\x1b[0m — ghostty-vt emulation, oshun's own paint\r\n\x1b[32m$\x1b[0m ") : fed
+                                |> std/io:print.ln("gallery: term fed {{ fed:d }} bytes")
+                    |> if (world.frame == 1 and world.live == 1)
+                        | then |> libs/vt:term-open(cols: 60, rows: 16, cmd: "zsh -i") : th2
+                            |> std/store:stored { world.termh: th2 }
+                            |> std/io:print.ln("gallery: term live session {{ th2:d }}")
                     |> std/store:query(entries)
                         ! query { [row]er, [id]ih } |> std/store:insert(uids) { uid: ih }
                             | row _
@@ -249,6 +265,11 @@ oshun:component(seed, spec) {
                         | then |> libs/metal:input.up(x: 120.0, y: 548.0)
                     |> if (world.frame == 33 and world.live == 0)
                         | then |> libs/metal:window.snap(path: "/tmp/gallery_pick4.bmp")
+                    // select the term entry by handle, snap the pick
+                    |> if (world.frame == 34 and world.live == 0)
+                        | then |> std/store:stored { world.sel: world.termsel }
+                    |> if (world.frame == 39 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_pick_term.bmp")
                     // EMIT — blind over view. el.clip carries no eid, so
                     // clip cmds are discriminated by DFS emission order:
                     // clip 0 is the sidebar list, clip 1 the stage.
@@ -290,6 +311,7 @@ oshun:component(seed, spec) {
                     // signature. One arm per catalog tork.
                     |> std/store:query(entries)
                         ! query { [row]se, [id]sid } when sid == world.sel
+                            |> std/store:stored { world.seltork: se.tork }
                             |> libs/metal:draw.shadow(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 34.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, blur: 22.0, r: 0.30, g: 0.22, b: 0.10, a: 0.35)
                             |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.94, g: 0.89, b: 0.78, a: 0.97)
                             |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 40.0, size: 13.0, r: 0.42, g: 0.34, b: 0.20, a: 0.9, text: se.sub)
@@ -317,9 +339,14 @@ oshun:component(seed, spec) {
                                 | then |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_33.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 30.0, a: 1.0)
                                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_36.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 224.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 38.0, a: 1.0)
                                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 368.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 46.0, a: 1.0)
+                            |> if (se.tork == 10 and world.termh >= 0 and world.cface >= 0)
+                                | then |> libs/components/term_termview:termview(f, term: world.termh, face: world.cface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 150.0, t: 1.0, a: 1.0)
                     |> if (world.frame == 40 and world.live == 0)
                         | then |> libs/host:quit()
                 ! key-down k when k.code == 53 |> libs/host:quit()
+                ! key-down k when world.seltork == 10 and world.termh >= 0
+                    |> std/io:print.ln("key code={{ k.code:d }} chars=|{{ k.chars:s }}|")
+                    |> libs/vt:term-key(h: world.termh, k.code, k.chars) : _
                 ! mouse-move e
                     |> std/store:stored { world.mx: @as(i64, @intFromFloat(e.x)), world.my: @as(i64, @intFromFloat(e.y)), world.hover: -1 }
                     |> std/store:query(hit)

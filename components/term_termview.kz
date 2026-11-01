@@ -1,0 +1,142 @@
+// termview — a live terminal session as a surface.
+//
+// What a session IS, drawn from its own bytes: the vt binding's
+// per-frame snapshot (poll drains the pty, snap walks the viewport
+// grid), each row emitted as same-styled runs — resolved colors, no
+// palette indices ever leave the binding — set on a measured mono
+// rhythm inside the ink-silk card, the session's own OSC title in the
+// header, a champagne block where the cursor sits. A session that fed
+// nothing draws its empty grid, inventing no text.
+//
+//   termview(f, term: h, face: mono, x, y, w, h, t: 1.0, a: 1.0)
+//
+//   f      — the live frame borrow (draw calls hang off it)
+//   term   — a vt:term-open handle (pty or feed-only session)
+//   face   — a mono font handle: term-font in a windowed or headless
+//            host (the window param is ignored by the proc)
+//   t      — entry progress 0..1; the caller drives it
+//   a      — master alpha
+//
+// Headless companions ride the frame's OWN TextSystem and metal's
+// font registry, same seam as codeview — the numbers are the
+// renderer's, never assumed metrics.
+
+~import libs/metal
+~import libs/vt
+
+const std = @import("std");
+const M = @import("root").koru_libs.koru_metal;
+
+// Ease-out cubic on a clamped 0..1 progress — the entry motion's curve.
+~[retain]pub tor term-ease { t: f64 } -> f64
+
+~proc term-ease|zig {
+    const u = @min(1.0, @max(0.0, t));
+    const q = 1.0 - u;
+    return 1.0 - q * q * q;
+}
+
+// font.load's offscreen twin — the proc ignores its window, so the job
+// is identical: CGDataProvider + CGFont appended to metal's registry.
+~pub tor term-font { path: string } | font i64 | err string
+
+~proc term-font|zig {
+    const pool = M.objc_autoreleasePoolPush();
+    defer M.objc_autoreleasePoolPop(pool);
+    var pbuf: [1024]u8 = undefined;
+    const dp = M.CGDataProviderCreateWithFilename(M.cstr(path, &pbuf)) orelse
+        return .{ .err = "metal: font file not readable" };
+    defer M.cf.CFRelease(dp);
+    const cg = M.CGFontCreateWithDataProvider(dp) orelse
+        return .{ .err = "metal: not a font file" };
+    M.loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("metal: OOM registering font");
+    return .{ .font = @intCast(M.loaded_fonts.items.len) };
+}
+
+// The fixed cell advance — a mono face shapes "0" once and every cell
+// stands on it. Measured, never assumed.
+~[retain]pub tor term-cellw { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+
+~proc term-cellw|zig {
+    return @floatCast(f.text.layout("0", face, @floatCast(size)).width);
+}
+
+// The measured line box — ascent + descent at this size and face.
+~[retain]pub tor term-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+
+~proc term-lineh|zig {
+    const ft = f.text.font(face, @floatCast(size));
+    const asc: f64 = @floatCast(ft.ascent);
+    const dsc: f64 = @floatCast(ft.descent);
+    return asc + dsc;
+}
+
+// "80x24" as a header tag — the session's own geometry.
+var term_dims_buf: [24]u8 = undefined;
+
+~[retain]pub tor term-dims-tag { cols: i64, rows: i64 } -> string
+
+~proc term-dims-tag|zig {
+    return std.fmt.bufPrint(&term_dims_buf, "{d}x{d}", .{ cols, rows }) catch "";
+}
+
+// The component. One draw chain: poll the pty, snap the grid, then the
+// ink silk body, champagne hairline, header (session title + dims),
+// clipped rows of styled runs, the cursor block. `e` is the eased
+// entry — the card rises 14pt and fades in.
+~pub tor termview {
+    f: *libs/metal:Frame<frame>,
+    term: i64, face: i64,
+    x: f64, y: f64, w: f64, h: f64,
+    t: f64, a: f64,
+}
+
+~termview = libs/vt:term-theme(h: term, fg: 15129538, bg: 1709852) : _
+    |> libs/vt:term-poll(h: term) : _
+    |> libs/vt:term-snap(h: term) : _
+    |> term-ease(t) : e
+    |> libs/vt:term-cols() : nc
+    |> libs/vt:term-rows() : nr
+    |> term-cellw(f, size: 13.0, face) : cw
+    |> term-lineh(f, size: 13.0, face) : lh
+    // floor shadow — the card floats over the room's silk
+    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
+    // ink body — the terminal's own dark
+    |> libs/metal:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.10, g: 0.09, b: 0.11, a: 0.97 * a * e)
+    // champagne hairline around the body
+    |> libs/metal:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
+    // header — the session's OSC title (or "term") left, geometry right
+    |> libs/vt:term-title-or(h: term, fb: "term") : ttl
+    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
+    |> term-dims-tag(cols: nc, rows: nr) : dt
+    |> term-cellw(f, size: 11.0, face) : cwm
+    |> libs/metal:draw.textface(f, x: x + w - 16.0 - cwm * 5.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: dt)
+    // the header rule — a champagne hairline
+    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
+    // the grid — clipped to the body below the header; runs carry their
+    // own colors, empty spans still paint their background
+    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> libs/vt:term-cvis() : cvs
+    |> libs/vt:term-cx() : ccx
+    |> libs/vt:term-cy() : ccy
+    |> for(0..@as(usize, @intCast(@max(0, nr))))
+        ! each ry |> libs/vt:term-runs(row: @as(i64, @intCast(ry)))
+            ! run ru
+                |> if (ru.bgr >= 0)
+                    | then |> libs/metal:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, w: @as(f64, @floatFromInt(ru.cells)) * cw, h: lh,
+                        r: @as(f64, @floatFromInt(ru.bgr)) / 255.0,
+                        g: @as(f64, @floatFromInt(ru.bgg)) / 255.0,
+                        b: @as(f64, @floatFromInt(ru.bgb)) / 255.0,
+                        a: a * e)
+                |> if (ru.n > 0)
+                    | then |> libs/metal:draw.textface(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, size: 13.0, font: face,
+                        r: @as(f64, @floatFromInt(ru.fgr)) / 255.0,
+                        g: @as(f64, @floatFromInt(ru.fgg)) / 255.0,
+                        b: @as(f64, @floatFromInt(ru.fgb)) / 255.0,
+                        a: a * e * if ((ru.flags & 2) != 0) @as(f64, 0.6) else 1.0,
+                        ru.text)
+            | drained |> _
+    |> libs/metal:draw.clip.pop(f)
+    // the cursor — a champagne underline where the session's cursor sits
+    |> if (cvs == 1)
+        | then |> libs/metal:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ccx)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ccy)) * lh + lh - 3.0, w: cw, h: 2.0, r: 0.95, g: 0.85, b: 0.45, a: 0.9 * a * e)

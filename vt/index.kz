@@ -1,0 +1,625 @@
+// @oshun/vt — libghostty-vt bound for Koru.
+//
+// Ghostty's emulation brain on oshun's wire: a session is a pty plus a
+// GhosttyTerminal — spawn a real command, poll its master each frame,
+// the terminal's grid is what the bytes ARE. Painting is never this
+// layer's job: the component reads the snapshot and draws its own
+// cells through the frame's own text pipeline.
+//
+//   vt:term-open(cols: 80, rows: 24, cmd: "zsh")      -> h i64
+//   vt:term-feed(h, bytes: "...")                     canned bytes in
+//   vt:term-poll(h)                                   drain master -> vt
+//   vt:term-write(h, bytes: "ls\n")                   input -> master
+//   vt:term-snap(h)                                   walk viewport grid
+//   vt:term-cols() / vt:term-rows()                   snapshot dims
+//   vt:term-cp / -fg / -bg / -flags / -coff(i)        cell i of snap
+//   vt:term-row-text(y)                               row's utf8 bytes
+//   vt:term-cx() / -cy() / -cvis()                    snapshot cursor
+//   vt:term-title(h)                                  OSC title, live
+//   vt:term-close(h)                                  release the slot
+//
+// The snapshot is the frame seam: term-snap walks every viewport cell
+// once inside Zig (grid_ref -> cell_get -> grid_ref_style, palette
+// resolved here so palette indices never escape) and leaves flat
+// buffers the draw side indexes by raw cell number — thousands of
+// cheap scalar reads, one FFI walk per frame.
+
+~import std/build
+
+~std/build:requires {
+    exe.linkLibC();
+    exe.addLibraryPath(.{ .cwd_relative = "/Users/larsde/src/oshun/third_party/ghostty-vt/lib" });
+    exe.linkSystemLibrary("ghostty-vt");
+    exe.addIncludePath(.{ .cwd_relative = "/Users/larsde/src/oshun/third_party/ghostty-vt/include" });
+}
+
+const std = @import("std");
+const c = @cImport({
+    @cInclude("ghostty/vt.h");
+});
+const uposix = @cImport({
+    @cInclude("util.h");
+    @cInclude("spawn.h");
+    @cInclude("unistd.h");
+    @cInclude("poll.h");
+    @cInclude("sys/wait.h");
+});
+
+extern "c" fn posix_spawnattr_init(*uposix.posix_spawnattr_t) c_int;
+extern "c" fn posix_spawn_file_actions_init(*uposix.posix_spawn_file_actions_t) c_int;
+extern "c" fn posix_spawn_file_actions_adddup2(*uposix.posix_spawn_file_actions_t, c_int, c_int) c_int;
+extern "c" fn posix_spawnattr_setflags(*uposix.posix_spawnattr_t, c_short) c_int;
+extern "c" fn kill(c_int, c_int) c_int;
+
+const MAX_TERMS = 8;
+const MAX_COLS = 256;
+const MAX_ROWS = 128;
+const MAX_CELLS = MAX_COLS * MAX_ROWS;
+
+const Term = struct {
+    term: c.GhosttyTerminal,
+    enc: c.GhosttyKeyEncoder,
+    master: c_int,
+    pid: c_int,
+    cols: i64,
+    rows: i64,
+    live: bool,
+};
+
+var terms: [MAX_TERMS]?Term = .{null} ** MAX_TERMS;
+
+// The last snapshot — flat buffers, indexed by row * cols + col.
+// bg 0xFFFFFFFF means "no cell background" (paint the pane's own).
+var snap_cols: i64 = 0;
+var snap_rows: i64 = 0;
+var snap_cx: i64 = -1;
+var snap_cy: i64 = -1;
+var snap_cvis: i64 = 0;
+var snap_cp: [MAX_CELLS]u32 = undefined;
+var snap_fg: [MAX_CELLS]u32 = undefined;
+var snap_bg: [MAX_CELLS]u32 = undefined;
+var snap_fl: [MAX_CELLS]u32 = undefined;
+var snap_coff: [MAX_CELLS]u32 = undefined;
+var snap_row_text: [MAX_ROWS][MAX_COLS * 4]u8 = undefined;
+var snap_row_len: [MAX_ROWS]u32 = undefined;
+
+fn termAt(h: i64) ?*Term {
+    if (h < 1 or h > MAX_TERMS) return null;
+    const i: usize = @intCast(h - 1);
+    if (terms[i] == null) return null;
+    return &terms[i].?;
+}
+
+fn rgbPack(rgb: c.GhosttyColorRgb) u32 {
+    return (@as(u32, rgb.r) << 16) | (@as(u32, rgb.g) << 8) | rgb.b;
+}
+
+// Resolve a style color to packed RGB against the terminal's live
+// palette; `none` returns 0xFFFFFFFF so "unset" stays distinguishable
+// from real black.
+fn styleColor(
+    term: c.GhosttyTerminal,
+    sc: c.GhosttyStyleColor,
+    which: c.GhosttyTerminalData,
+    pal: *const [256]c.GhosttyColorRgb,
+) u32 {
+    return switch (sc.tag) {
+        c.GHOSTTY_STYLE_COLOR_RGB => rgbPack(sc.value.rgb),
+        c.GHOSTTY_STYLE_COLOR_PALETTE => rgbPack(pal[sc.value.palette]),
+        else => blk: {
+            var d: c.GhosttyColorRgb = .{ .r = 0, .g = 0, .b = 0 };
+            _ = c.ghostty_terminal_get(term, which, &d);
+            break :blk rgbPack(d);
+        },
+    };
+}
+
+// Open a session: ghostty terminal of cols x rows behind slot h. cmd
+// non-empty additionally openptys and posix_spawns `sh -c cmd` on the
+// slave end — the grid then fills from real output; empty cmd makes a
+// feed-only session for canned bytes.
+~pub tor term-open { cols: i64, rows: i64, cmd: string } -> i64
+
+~proc term-open|zig {
+    var slot: usize = MAX_TERMS;
+    for (0..MAX_TERMS) |i| {
+        if (terms[i] == null) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == MAX_TERMS) return -1;
+
+    var term: c.GhosttyTerminal = null;
+    if (c.ghostty_terminal_new(null, &term, @intCast(cols), @intCast(rows)) != c.GHOSTTY_SUCCESS)
+        return -2;
+
+    var master: c_int = -1;
+    var pid: c_int = 0;
+    var live = false;
+    if (cmd.len > 0) {
+        var slave: c_int = -1;
+        var ws: uposix.struct_winsize = .{
+            .ws_row = @intCast(rows),
+            .ws_col = @intCast(cols),
+            .ws_xpixel = 0,
+            .ws_ypixel = 0,
+        };
+        if (uposix.openpty(&master, &slave, null, null, &ws) != 0) {
+            c.ghostty_terminal_free(term);
+            return -3;
+        }
+        var attr: uposix.posix_spawnattr_t = undefined;
+        var fa: uposix.posix_spawn_file_actions_t = undefined;
+        _ = posix_spawnattr_init(&attr);
+        _ = posix_spawn_file_actions_init(&fa);
+        _ = posix_spawn_file_actions_adddup2(&fa, slave, 0);
+        _ = posix_spawn_file_actions_adddup2(&fa, slave, 1);
+        _ = posix_spawn_file_actions_adddup2(&fa, slave, 2);
+        const POSIX_SPAWN_SETSID: c_short = 0x0400;
+        _ = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
+        var cmdbuf: [1024]u8 = undefined;
+        const cn = @min(cmd.len, cmdbuf.len - 1);
+        @memcpy(cmdbuf[0..cn], cmd[0..cn]);
+        cmdbuf[cn] = 0;
+        const argv = [_][*c]u8{
+            @ptrCast(@constCast("/bin/sh")),
+            @ptrCast(@constCast("-c")),
+            @ptrCast(@constCast(cmdbuf[0..cn :0].ptr)),
+            null,
+        };
+        if (uposix.posix_spawn(&pid, "/bin/sh", &fa, &attr, &argv, null) != 0) {
+            _ = uposix.close(master);
+            _ = uposix.close(slave);
+            c.ghostty_terminal_free(term);
+            return -4;
+        }
+        _ = uposix.close(slave);
+        live = true;
+    }
+    var enc: c.GhosttyKeyEncoder = null;
+    if (c.ghostty_key_encoder_new(null, &enc) == c.GHOSTTY_SUCCESS)
+        c.ghostty_key_encoder_setopt_from_terminal(enc, term);
+    terms[slot] = .{ .term = term, .enc = enc, .master = master, .pid = pid, .cols = cols, .rows = rows, .live = live };
+    return @intCast(slot + 1);
+}
+
+// Canned bytes straight into the vt parser — the scripted path: no
+// shell, no timing, the grid is what the bytes say.
+~pub tor term-feed { h: i64, bytes: string } -> i64
+
+~proc term-feed|zig {
+    const t = termAt(h) orelse return -1;
+    c.ghostty_terminal_vt_write(t.term, bytes.ptr, bytes.len);
+    return @intCast(bytes.len);
+}
+
+// Drain the pty master into the terminal — poll(0), never blocks.
+// Returns bytes fed this call; 0 is a fine answer on a quiet session.
+~pub tor term-poll { h: i64 } -> i64
+
+~proc term-poll|zig {
+    const t = termAt(h) orelse return -1;
+    if (!t.live or t.master < 0) return 0;
+    var pfd: uposix.struct_pollfd = .{ .fd = t.master, .events = uposix.POLLIN, .revents = 0 };
+    var buf: [8192]u8 = undefined;
+    var drained: i64 = 0;
+    while (uposix.poll(&pfd, 1, 0) > 0) {
+        const n = uposix.read(t.master, &buf, buf.len);
+        if (n <= 0) {
+            t.live = false;
+            break;
+        }
+        c.ghostty_terminal_vt_write(t.term, buf[0..@intCast(n)].ptr, @intCast(n));
+        drained += n;
+        if (drained > 1 << 20) break;
+    }
+    return drained;
+}
+
+// Input into the session — keystrokes already encoded as vt bytes.
+~pub tor term-write { h: i64, bytes: string } -> i64
+
+~proc term-write|zig {
+    const t = termAt(h) orelse return -1;
+    if (t.master < 0) return -2;
+    const n = uposix.write(t.master, bytes.ptr, bytes.len);
+    return @intCast(@max(0, n));
+}
+
+// Walk the viewport into the snapshot buffers. One FFI pass per frame:
+// per cell — codepoint, resolved fg/bg, flags, and its byte offset in
+// the row's utf8 text (cp 0 cells get no bytes; empty cells inside a
+// run split it). Palette + default colors fetched once up front.
+~pub tor term-snap { h: i64 } -> i64
+
+~proc term-snap|zig {
+    const t = termAt(h) orelse return -1;
+    var cols: u16 = 0;
+    var rows: u16 = 0;
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_COLS, &cols);
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+    if (cols > MAX_COLS or rows > MAX_ROWS) return -3;
+    var pal: [256]c.GhosttyColorRgb = undefined;
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE, &pal);
+    var cx: u16 = 0;
+    var cy: u16 = 0;
+    var cvis: bool = false;
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_CURSOR_X, &cx);
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_CURSOR_Y, &cy);
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE, &cvis);
+    snap_cols = cols;
+    snap_rows = rows;
+    snap_cx = cx;
+    snap_cy = cy;
+    snap_cvis = if (cvis) 1 else 0;
+
+    var y: u32 = 0;
+    while (y < rows) : (y += 1) {
+        var tlen: u32 = 0;
+        var x: u16 = 0;
+        while (x < cols) : (x += 1) {
+            const i: usize = @as(usize, @intCast(y)) * cols + x;
+            snap_coff[i] = tlen;
+            const point = c.GhosttyPoint{
+                .tag = c.GHOSTTY_POINT_TAG_VIEWPORT,
+                .value = .{ .coordinate = .{ .x = x, .y = y } },
+            };
+            var ref: c.GhosttyGridRef = undefined;
+            if (c.ghostty_terminal_grid_ref(t.term, point, &ref) != c.GHOSTTY_SUCCESS) {
+                snap_cp[i] = 0;
+                continue;
+            }
+            var cell: c.GhosttyCell = 0;
+            var cp: u32 = 0;
+            _ = c.ghostty_grid_ref_cell(&ref, &cell);
+            _ = c.ghostty_cell_get(cell, c.GHOSTTY_CELL_DATA_CODEPOINT, &cp);
+            var st: c.GhosttyStyle = undefined;
+            c.ghostty_style_default(&st);
+            _ = c.ghostty_grid_ref_style(&ref, &st);
+            var fg = styleColor(t.term, st.fg_color, c.GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT, &pal);
+            // bg: an unset tag means "the pane's own silk" — the card
+            // body is the terminal's paper; only an explicit cell
+            // color paints.
+            var bg: u32 = switch (st.bg_color.tag) {
+                c.GHOSTTY_STYLE_COLOR_RGB => rgbPack(st.bg_color.value.rgb),
+                c.GHOSTTY_STYLE_COLOR_PALETTE => rgbPack(pal[st.bg_color.value.palette]),
+                else => 0xFFFFFFFF,
+            };
+            if (st.inverse) {
+                const tmp = fg;
+                fg = if (bg == 0xFFFFFFFF) rgbPack(.{ .r = 0, .g = 0, .b = 0 }) else bg;
+                bg = tmp;
+            }
+            var fl: u32 = 0;
+            if (st.bold) fl |= 1;
+            if (st.faint) fl |= 2;
+            if (st.italic) fl |= 4;
+            if (st.underline != 0) fl |= 8;
+            if (st.strikethrough) fl |= 16;
+            if (st.invisible) cp = 0;
+            snap_cp[i] = cp;
+            snap_fg[i] = fg;
+            snap_bg[i] = bg;
+            snap_fl[i] = fl;
+            if (cp != 0 and tlen < snap_row_text[y].len - 4) {
+                const nb = std.unicode.utf8Encode(@intCast(cp), snap_row_text[y][tlen..][0..4]) catch 0;
+                tlen += @intCast(nb);
+            }
+        }
+        snap_row_len[y] = tlen;
+    }
+    return 1;
+}
+
+~[retain]pub tor term-cols {} -> i64
+
+~proc term-cols|zig {
+    return snap_cols;
+}
+
+~[retain]pub tor term-rows {} -> i64
+
+~proc term-rows|zig {
+    return snap_rows;
+}
+
+~[retain]pub tor term-cx {} -> i64
+
+~proc term-cx|zig {
+    return snap_cx;
+}
+
+~[retain]pub tor term-cy {} -> i64
+
+~proc term-cy|zig {
+    return snap_cy;
+}
+
+~[retain]pub tor term-cvis {} -> i64
+
+~proc term-cvis|zig {
+    return snap_cvis;
+}
+
+~[retain]pub tor term-cp { i: i64 } -> i64
+
+~proc term-cp|zig {
+    if (i < 0 or i >= MAX_CELLS) return 0;
+    return snap_cp[@intCast(i)];
+}
+
+~[retain]pub tor term-fg { i: i64 } -> i64
+
+~proc term-fg|zig {
+    if (i < 0 or i >= MAX_CELLS) return 0;
+    return snap_fg[@intCast(i)];
+}
+
+// bg — 0xFFFFFFFF signals "no cell background" (paint the pane's).
+~[retain]pub tor term-bg { i: i64 } -> i64
+
+~proc term-bg|zig {
+    if (i < 0 or i >= MAX_CELLS) return -1;
+    return @intCast(snap_bg[@intCast(i)]);
+}
+
+~[retain]pub tor term-flags { i: i64 } -> i64
+
+~proc term-flags|zig {
+    if (i < 0 or i >= MAX_CELLS) return 0;
+    return snap_fl[@intCast(i)];
+}
+
+// The cell's byte offset inside its row text — run slicing uses the
+// first cell's offset as start and the next run's as end.
+~[retain]pub tor term-coff { i: i64 } -> i64
+
+~proc term-coff|zig {
+    if (i < 0 or i >= MAX_CELLS) return 0;
+    return snap_coff[@intCast(i)];
+}
+
+~[retain]pub tor term-row-end { y: i64 } -> i64
+
+~proc term-row-end|zig {
+    if (y < 0 or y >= MAX_ROWS) return 0;
+    return snap_row_len[@intCast(y)];
+}
+
+// The row's utf8 bytes — the draw side slices run spans out of this.
+~[retain]pub tor term-row-text { y: i64 } -> string
+
+~proc term-row-text|zig {
+    if (y < 0 or y >= MAX_ROWS) return "";
+    return snap_row_text[@intCast(y)][0..snap_row_len[@intCast(y)]];
+}
+
+// The OSC title the session declared — live, so headers can name the
+// running program rather than the canned label.
+~[retain]pub tor term-title { h: i64 } -> string
+
+~proc term-title|zig {
+    const t = termAt(h) orelse return "";
+    var gs: c.GhosttyString = .{ .ptr = null, .len = 0 };
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_TITLE, &gs);
+    if (gs.len == 0 or gs.ptr == null) return "";
+    return gs.ptr[0..gs.len];
+}
+
+~pub tor term-close { h: i64 } -> i64
+
+~proc term-close|zig {
+    if (h < 1 or h > MAX_TERMS) return -1;
+    const i: usize = @intCast(h - 1);
+    const t = terms[i] orelse return -1;
+    if (t.master >= 0) _ = uposix.close(t.master);
+    if (t.pid > 0) _ = kill(t.pid, 9);
+    if (t.enc != null) c.ghostty_key_encoder_free(t.enc);
+    c.ghostty_terminal_free(t.term);
+    terms[i] = null;
+    return 0;
+}
+
+// One styled span of a snapshot row — `col` the starting cell, `cells`
+// its width, `text` the run's utf8 bytes (empty on background-only
+// spans), fg*/bg* the resolved channels 0-255 (bg -1 = no cell
+// background), `flags` 1 bold 2 faint 4 italic 8 underline 16 strike.
+pub const TermRun = struct {
+    col: i64,
+    cells: i64,
+    n: i64,
+    text: []const u8,
+    fgr: i64,
+    fgg: i64,
+    fgb: i64,
+    bgr: i64,
+    bgg: i64,
+    bgb: i64,
+    flags: i64,
+};
+
+// Row y walked into maximal same-style runs — `! run` fires per span.
+// Empty cells still emit (bg-only) so painted backgrounds survive gaps.
+~[retain]pub tor term-runs { row: i64 }
+! run TermRun
+| drained
+
+~proc term-runs|zig {
+    const cols: usize = @intCast(@max(0, $mod.snap_cols));
+    const yy: usize = @intCast(@max(0, row));
+    if (yy >= $mod.MAX_ROWS or cols == 0) return .{ .drained = .{} };
+    const base = yy * cols;
+    var colx: usize = 0;
+    while (colx < cols) {
+        const i = base + colx;
+        const fg = $mod.snap_fg[i];
+        const bg = $mod.snap_bg[i];
+        const fl = $mod.snap_fl[i];
+        var x1 = colx + 1;
+        while (x1 < cols and
+            $mod.snap_fg[base + x1] == fg and
+            $mod.snap_bg[base + x1] == bg and
+            $mod.snap_fl[base + x1] == fl and
+            ($mod.snap_cp[i] == 0) == ($mod.snap_cp[base + x1] == 0)) : (x1 += 1)
+        {}
+        const o0 = $mod.snap_coff[i];
+        const o1 = if (x1 < cols) $mod.snap_coff[base + x1] else $mod.snap_row_len[yy];
+        run(.{
+            .col = @as(i64, @intCast(colx)),
+            .cells = @as(i64, @intCast(x1 - colx)),
+            .n = @as(i64, @intCast(o1 - o0)),
+            .text = $mod.snap_row_text[yy][o0..o1],
+            .fgr = @as(i64, @intCast((fg >> 16) & 255)),
+            .fgg = @as(i64, @intCast((fg >> 8) & 255)),
+            .fgb = @as(i64, @intCast(fg & 255)),
+            .bgr = if (bg == 0xFFFFFFFF) @as(i64, -1) else @as(i64, @intCast((bg >> 16) & 255)),
+            .bgg = if (bg == 0xFFFFFFFF) @as(i64, -1) else @as(i64, @intCast((bg >> 8) & 255)),
+            .bgb = if (bg == 0xFFFFFFFF) @as(i64, -1) else @as(i64, @intCast(bg & 255)),
+            .flags = @as(i64, @intCast(fl)),
+        });
+        colx = x1;
+    }
+    return .{ .drained = .{} };
+}
+
+// Title with a fallback — headers name the session when it declared
+// one, the caller's word otherwise.
+~[retain]pub tor term-title-or { h: i64, fb: string } -> string
+
+~proc term-title-or|zig {
+    const t = termAt(h) orelse return fb;
+    var gs: c.GhosttyString = .{ .ptr = null, .len = 0 };
+    _ = c.ghostty_terminal_get(t.term, c.GHOSTTY_TERMINAL_DATA_TITLE, &gs);
+    if (gs.len == 0 or gs.ptr == null) return fb;
+    return gs.ptr[0..gs.len];
+}
+
+// The session's material — default fg/bg packed 0xRRGGBB, set through
+// ghostty's own color options so OSC overrides still layer on top.
+// Bare terminals are black-on-black; the surface names its palette.
+~pub tor term-theme { h: i64, fg: i64, bg: i64 } -> i64
+
+~proc term-theme|zig {
+    const t = termAt(h) orelse return -1;
+    var cfg: c.GhosttyColorRgb = .{
+        .r = @intCast((fg >> 16) & 255),
+        .g = @intCast((fg >> 8) & 255),
+        .b = @intCast(fg & 255),
+    };
+    _ = c.ghostty_terminal_set(t.term, c.GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &cfg);
+    cfg = .{
+        .r = @intCast((bg >> 16) & 255),
+        .g = @intCast((bg >> 8) & 255),
+        .b = @intCast(bg & 255),
+    };
+    _ = c.ghostty_terminal_set(t.term, c.GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &cfg);
+    return 0;
+}
+
+// macOS virtual keycode → GhosttyKey (ANSI layout). Unmapped codes
+// stay UNIDENTIFIED — the encoder still writes utf8 text through.
+const keycode_map = blk: {
+    var m = [_]i32{c.GHOSTTY_KEY_UNIDENTIFIED} ** 128;
+    m[0] = c.GHOSTTY_KEY_A;
+    m[1] = c.GHOSTTY_KEY_S;
+    m[2] = c.GHOSTTY_KEY_D;
+    m[3] = c.GHOSTTY_KEY_F;
+    m[4] = c.GHOSTTY_KEY_H;
+    m[5] = c.GHOSTTY_KEY_G;
+    m[6] = c.GHOSTTY_KEY_Z;
+    m[7] = c.GHOSTTY_KEY_X;
+    m[8] = c.GHOSTTY_KEY_C;
+    m[9] = c.GHOSTTY_KEY_V;
+    m[11] = c.GHOSTTY_KEY_B;
+    m[12] = c.GHOSTTY_KEY_Q;
+    m[13] = c.GHOSTTY_KEY_W;
+    m[14] = c.GHOSTTY_KEY_E;
+    m[15] = c.GHOSTTY_KEY_R;
+    m[16] = c.GHOSTTY_KEY_Y;
+    m[17] = c.GHOSTTY_KEY_T;
+    m[18] = c.GHOSTTY_KEY_DIGIT_1;
+    m[19] = c.GHOSTTY_KEY_DIGIT_2;
+    m[20] = c.GHOSTTY_KEY_DIGIT_3;
+    m[21] = c.GHOSTTY_KEY_DIGIT_4;
+    m[22] = c.GHOSTTY_KEY_DIGIT_6;
+    m[23] = c.GHOSTTY_KEY_DIGIT_5;
+    m[24] = c.GHOSTTY_KEY_EQUAL;
+    m[25] = c.GHOSTTY_KEY_DIGIT_9;
+    m[26] = c.GHOSTTY_KEY_DIGIT_7;
+    m[27] = c.GHOSTTY_KEY_MINUS;
+    m[28] = c.GHOSTTY_KEY_DIGIT_8;
+    m[29] = c.GHOSTTY_KEY_DIGIT_0;
+    m[30] = c.GHOSTTY_KEY_BRACKET_RIGHT;
+    m[31] = c.GHOSTTY_KEY_O;
+    m[32] = c.GHOSTTY_KEY_U;
+    m[33] = c.GHOSTTY_KEY_BRACKET_LEFT;
+    m[34] = c.GHOSTTY_KEY_I;
+    m[35] = c.GHOSTTY_KEY_P;
+    m[36] = c.GHOSTTY_KEY_ENTER;
+    m[37] = c.GHOSTTY_KEY_L;
+    m[38] = c.GHOSTTY_KEY_J;
+    m[39] = c.GHOSTTY_KEY_QUOTE;
+    m[40] = c.GHOSTTY_KEY_K;
+    m[41] = c.GHOSTTY_KEY_SEMICOLON;
+    m[42] = c.GHOSTTY_KEY_BACKSLASH;
+    m[43] = c.GHOSTTY_KEY_COMMA;
+    m[44] = c.GHOSTTY_KEY_SLASH;
+    m[45] = c.GHOSTTY_KEY_N;
+    m[46] = c.GHOSTTY_KEY_M;
+    m[47] = c.GHOSTTY_KEY_PERIOD;
+    m[48] = c.GHOSTTY_KEY_TAB;
+    m[49] = c.GHOSTTY_KEY_SPACE;
+    m[50] = c.GHOSTTY_KEY_BACKQUOTE;
+    m[51] = c.GHOSTTY_KEY_BACKSPACE;
+    m[53] = c.GHOSTTY_KEY_ESCAPE;
+    m[76] = c.GHOSTTY_KEY_NUMPAD_ENTER;
+    m[96] = c.GHOSTTY_KEY_F5;
+    m[97] = c.GHOSTTY_KEY_F6;
+    m[98] = c.GHOSTTY_KEY_F7;
+    m[99] = c.GHOSTTY_KEY_F3;
+    m[100] = c.GHOSTTY_KEY_F8;
+    m[101] = c.GHOSTTY_KEY_F9;
+    m[103] = c.GHOSTTY_KEY_F11;
+    m[109] = c.GHOSTTY_KEY_F10;
+    m[111] = c.GHOSTTY_KEY_F12;
+    m[113] = c.GHOSTTY_KEY_F15;
+    m[114] = c.GHOSTTY_KEY_INSERT;
+    m[115] = c.GHOSTTY_KEY_HOME;
+    m[116] = c.GHOSTTY_KEY_PAGE_UP;
+    m[117] = c.GHOSTTY_KEY_DELETE;
+    m[118] = c.GHOSTTY_KEY_F4;
+    m[119] = c.GHOSTTY_KEY_END;
+    m[120] = c.GHOSTTY_KEY_F2;
+    m[121] = c.GHOSTTY_KEY_PAGE_DOWN;
+    m[122] = c.GHOSTTY_KEY_F1;
+    m[123] = c.GHOSTTY_KEY_ARROW_LEFT;
+    m[124] = c.GHOSTTY_KEY_ARROW_RIGHT;
+    m[125] = c.GHOSTTY_KEY_ARROW_DOWN;
+    m[126] = c.GHOSTTY_KEY_ARROW_UP;
+    break :blk m;
+};
+
+// A physical keypress → encoder → master. `code` is the macOS virtual
+// keycode, `chars` the event's typed text (may be empty — the encoder
+// produces the sequence from the key identity alone: return→\r,
+// backspace→DEL, arrows→CSI). Returns bytes written to the pty.
+~pub tor term-key { h: i64, code: i64, chars: string } -> i64
+
+~proc term-key|zig {
+    const t = termAt(h) orelse return -1;
+    if (t.master < 0) return -2;
+    if (t.enc == null) return -3;
+    var ev: c.GhosttyKeyEvent = null;
+    if (c.ghostty_key_event_new(null, &ev) != c.GHOSTTY_SUCCESS) return -4;
+    defer c.ghostty_key_event_free(ev);
+    c.ghostty_key_event_set_action(ev, c.GHOSTTY_KEY_ACTION_PRESS);
+    c.ghostty_key_event_set_key(ev, if (code >= 0 and code < 128) keycode_map[@intCast(code)] else c.GHOSTTY_KEY_UNIDENTIFIED);
+    if (chars.len > 0) c.ghostty_key_event_set_utf8(ev, chars.ptr, chars.len);
+    var buf: [64]u8 = undefined;
+    var n: usize = 0;
+    if (c.ghostty_key_encoder_encode(t.enc, ev, &buf, buf.len, &n) != c.GHOSTTY_SUCCESS) return 0;
+    if (n == 0) return 0;
+    const wr = uposix.write(t.master, buf[0..n].ptr, n);
+    return @intCast(@max(0, wr));
+}

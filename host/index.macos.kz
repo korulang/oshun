@@ -191,10 +191,20 @@ pub const HotkeyData = struct {
     down: i64,
 };
 
+// Siri Remote buttons ride the shared ring — usage/page are raw HID,
+// down is 1 on press, 0 on release (Consumer page 0x0c: select 0x80,
+// play 0xcd, mic 0x04; Back is page 0x01 usage 0x86).
+pub const RemoteData = struct {
+    button: u32,
+    page: u32,
+    down: u8,
+};
+
 pub const HostEvent = union(enum) {
     tray: TrayActionData,
     menu: MenuActionData,
     hotkey: HotkeyData,
+    remote_button: RemoteData,
 };
 
 var ev_buf: [64]HostEvent = undefined;
@@ -214,6 +224,7 @@ fn pushEvent(e: HostEvent, action_src: []const u8) void {
         .tray => |*t| t.action = ev_actions[ev_tail][0..n],
         .menu => |*m| m.action = ev_actions[ev_tail][0..n],
         .hotkey => {},
+        .remote_button => {},
     }
     ev_buf[ev_tail] = ev;
     ev_tail = next;
@@ -229,6 +240,13 @@ fn menuPushAction(tag: i64, action: []const u8) void {
 
 fn pushHotkey(d: HotkeyData) void {
     pushEvent(.{ .hotkey = d }, "");
+}
+
+// metal's remoteValueCb owns the IOHIDManager but remote input belongs on
+// the shared ring — a tray agent draining here gets it without a frames
+// pump running.
+pub fn pushRemote(d: RemoteData) void {
+    pushEvent(.{ .remote_button = d }, "");
 }
 
 pub fn popEvent() ?HostEvent {
@@ -841,6 +859,7 @@ const HostArms = struct {
     tray: *const fn (TrayActionData) void,
     menu: *const fn (MenuActionData) void,
     hotkey: *const fn (HotkeyData) void,
+    remote: *const fn (RemoteData) void,
 };
 
 var host_arms: ?HostArms = null;
@@ -862,6 +881,7 @@ fn impHostTick(recv: Id, _s: SEL, timer: Id) callconv(.c) void {
                 .tray => |td| arms.tray(td),
                 .menu => |md| arms.menu(md),
                 .hotkey => |hk| arms.hotkey(hk),
+                .remote_button => |rd| arms.remote(rd),
             }
         }
     }
@@ -912,12 +932,13 @@ fn ensureHostTickTarget() ?Id {
 ! ?tray-action libs/host:TrayActionData
 ! ?menu-action libs/host:MenuActionData
 ! ?hotkey libs/host:HotkeyData
+! ?remote-button libs/host:RemoteData
 | done
 
 ~proc host.run|zig {
     const __cap = @as(?i32, count) orelse 2147483647;
     const app = $mod.ensureApp();
-    $mod.host_arms = .{ .tray = tray_action, .menu = menu_action, .hotkey = hotkey };
+    $mod.host_arms = .{ .tray = tray_action, .menu = menu_action, .hotkey = hotkey, .remote = remote_button };
     $mod.host_app = app;
     $mod.host_ticks = 0;
     $mod.host_cap = __cap;

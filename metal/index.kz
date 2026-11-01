@@ -1105,11 +1105,11 @@ fn remoteValueCb(_: ?*anyopaque, _: c_int, _: ?*anyopaque, v: hid.IOHIDValueRef)
     const usage: u32 = @intCast(hid.IOHIDElementGetUsage(el));
     const iv = hid.IOHIDValueGetIntegerValue(v);
     if (iv != 0 and iv != 1) return; // touch/scroll axes, not buttons
-    pushEvent(.{ .remote_button = .{
+    H.pushRemote(.{
         .button = usage,
         .page = page,
         .down = @intCast(iv),
-    } });
+    });
 }
 
 fn hidEnsure() void {
@@ -1939,7 +1939,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 ~proc window.show|zig {
     const wf = send(NSRect, win.win, sel("frame"));
     send1(void, NSPoint, win.win, sel("setFrameOrigin:"), overlayOrigin(wf.size.width, wf.size.height));
-    send1(void, Id, win.win, sel("orderFront:"), @as(Id, null));
+    send1(void, Id, win.win, sel("orderFrontRegardless"), @as(Id, null));
 }
 
 // Order the overlay out — the token lives on; the next show()+frames cycle
@@ -1950,7 +1950,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 ~pub tor window.pin { win: *Window<opened|active> }
 ~proc window.pin|zig {
     send1(void, bool, win.win, sel("setHidesOnDeactivate:"), false);
-    send1(void, Id, win.win, sel("orderFront:"), @as(Id, null));
+    send1(void, Id, win.win, sel("orderFrontRegardless"), @as(Id, null));
 }
 
 ~pub tor window.hide { win: *Window<opened|active> }
@@ -1970,6 +1970,14 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
 // optional `! ?` arms. Unbound optional arms are generated no-ops. `! close`
 // fires when the window closed (isVisible polled — no delegate needed; the
 // default close button just closes); quit() breaks the loop.
+// Schedule the Siri Remote listener for a headless agent — frames calls
+// hidEnsure() on entry already; a tray-only host.run needs it scheduled
+// explicitly or remote events never arrive.
+~pub tor remote.watch { }
+~proc remote.watch|zig {
+    hidEnsure();
+}
+
 ~pub tor frames { win: *Window<!opened|!active>, count: ?i32 }
 ! frame *Frame<frame!>
 ! ?key-down libs/metal:KeyData
@@ -2038,6 +2046,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
                 .tray => |td| tray_action(td),
                 .menu => |md| menu_action(md),
                 .hotkey => |hk| hotkey(hk),
+                .remote_button => |rd| remote_button(.{ .button = rd.button, .page = rd.page, .down = rd.down }),
             }
         }
         if ($mod.H.should_quit) break;
