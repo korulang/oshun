@@ -16,3 +16,4 @@ history.jsonl
 .mygo/
 *.app/
 .DS_Store
+.claude/worktrees/
