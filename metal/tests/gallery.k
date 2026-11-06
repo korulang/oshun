@@ -48,11 +48,16 @@ std/store:new(world) {
     stageh: -1[i64], wavslot: -1[i64], docslot: -1[i64],
     codeslot: -1[i64], diffslot: -1[i64], termh: -1[i64], seltork: -1[i64], termsel: -1[i64],
     tex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
+    fu: -1[i64], psel: -1[i64], dive: 0[i64], coghot: 0[i64],
 }
 std/store:new(fworld) {
     scroll: 0.0[f64],
     lx0: 0.0[f64], ly0: 0.0[f64], lx1: 240.0[f64], ly1: 600.0[f64],
     sx0: 0.0[f64], sy0: 0.0[f64], sx1: 1.0[f64], sy1: 1.0[f64],
+    cx0: 0.0[f64], cy0: 0.0[f64], cw: 0.0[f64], ch: 0.0[f64],
+    ft: 0.0[f64], fe: 0.0[f64], fx0: 0.0[f64], fy0: 0.0[f64], frt: 0.0[f64], fb: 0.0[f64],
+    rx: 0.0[f64], ry: 0.0[f64], rw: 0.0[f64], rh: 0.0[f64], ba: 0.0[f64], ha: 1.0[f64],
+    dt: 0.0[f64], da: 0.0[f64], sa: 0.0[f64], shy: 0.0[f64], ft0: 0.0[f64], dt0: 0.0[f64],
 }
 std/store:new(wins) { w: 1000.0[f64], h: 620.0[f64] }
 std/store:new(hit, capacity: 128) { seq: i64, cl: i64, x: f64, y: f64, w: f64, h: f64 }
@@ -134,6 +139,16 @@ oshun:component(seed, spec) {
             |> libs/metal:frames(win: w, count: if (world.live == 1) 999999 else 9999)
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1, world.clipn: 0 }
+                    // TRANSITION CLOCK — flight t (18f), eased lerp of the
+                    // flying chip toward the header slot, chip bg dissolve,
+                    // header fade-in, and the drill dive's dim/sheet alphas.
+                    // stored{} args may not read sibling fields written in
+                    // the same call — dependency-ordered calls below.
+                    |> std/store:stored { fworld.ft: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.ft0) / 18.0, 0.0), 1.0), fworld.dt: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.dt0) / 14.0, 0.0), 1.0) }
+                    |> std/store:stored { fworld.fe: 1.0 - (1.0 - fworld.ft) * (1.0 - fworld.ft) * (1.0 - fworld.ft) }
+                    |> std/store:stored { fworld.rx: fworld.fx0 + (fworld.sx0 + 44.0 - fworld.fx0) * fworld.fe, fworld.ry: fworld.fy0 + (fworld.sy0 + 34.0 - fworld.fy0) * fworld.fe, fworld.rw: (fworld.frt - fworld.fx0) + (190.0 - (fworld.frt - fworld.fx0)) * fworld.fe, fworld.rh: (fworld.fb - fworld.fy0) + (44.0 - (fworld.fb - fworld.fy0)) * fworld.fe }
+                    |> std/store:stored { fworld.ba: 0.92 * (1.0 - @min(@max((fworld.ft - 0.62) / 0.38, 0.0), 1.0)), fworld.ha: if (world.fu >= 0) @min(@max((fworld.ft - 0.75) / 0.25, 0.0), 1.0) else 1.0 }
+                    |> std/store:stored { fworld.da: (if (world.dive == 1) fworld.dt else 1.0 - fworld.dt) * 0.62, fworld.sa: if (world.dive == 1) fworld.dt else 1.0 - fworld.dt, fworld.shy: (if (world.dive == 1) 1.0 - fworld.dt else fworld.dt) * 26.0 }
                     |> std/store:clear(hit)
                     |> std/store:clear(view)
                     |> std/store:clear(uids)
@@ -220,9 +235,9 @@ oshun:component(seed, spec) {
                                             | row _
                                     |> std/store:query(entries)
                                         ! query { [row]en, [ordinal]io, [id]ih } when @as(i64, @intCast(io)) >= world.r0 and @as(i64, @intCast(io)) <= world.r1
-                                            |> std/store:insert(view) { d: s.d + 1, kind: "panel", wk: 1, w: 0.0, hk: 3, h: 52.0, dir: 1, gap: 0, padl: 10, padr: 10, padt: 6, padb: 6, ax: 0, ay: 0, r: 30.0 + (if (ih == world.sel) @as(f64, 52.0) else if (ih == world.hover) @as(f64, 20.0) else @as(f64, 0.0)), g: 30.0 + (if (ih == world.sel) @as(f64, 46.0) else if (ih == world.hover) @as(f64, 18.0) else @as(f64, 0.0)), b: 40.0 + (if (ih == world.sel) @as(f64, 22.0) else if (ih == world.hover) @as(f64, 10.0) else @as(f64, 0.0)), a: 255.0, ox: 0.0, oy: 0.0, uid: ih, tx: "", fs: 0.0 }
-                                                | row _ |> std/store:insert(view) { d: s.d + 2, kind: "text", wk: 0, w: 0.0, hk: 0, h: 0.0, dir: 0, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: if (ih == world.sel) @as(f64, 246.0) else 216.0, g: if (ih == world.sel) @as(f64, 230.0) else 210.0, b: if (ih == world.sel) @as(f64, 196.0) else 224.0, a: 255.0, ox: 0.0, oy: 0.0, uid: ih, tx: en.tx, fs: 14.0 }
-                                                    | row _ |> std/store:insert(view) { d: s.d + 2, kind: "text", wk: 0, w: 0.0, hk: 0, h: 0.0, dir: 0, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 132.0, g: 128.0, b: 118.0, a: 255.0, ox: 0.0, oy: 0.0, uid: ih, tx: en.sub, fs: 9.5 }
+                                            |> std/store:insert(view) { d: s.d + 1, kind: "panel", wk: 1, w: 0.0, hk: 3, h: 52.0, dir: 1, gap: 0, padl: 10, padr: 10, padt: 6, padb: 6, ax: 0, ay: 0, r: 30.0 + (if (ih == world.sel) @as(f64, 52.0) else if (ih == world.hover) @as(f64, 20.0) else @as(f64, 0.0)), g: 30.0 + (if (ih == world.sel) @as(f64, 46.0) else if (ih == world.hover) @as(f64, 18.0) else @as(f64, 0.0)), b: 40.0 + (if (ih == world.sel) @as(f64, 22.0) else if (ih == world.hover) @as(f64, 10.0) else @as(f64, 0.0)), a: 255.0 * (if (ih == world.fu and world.fu >= 0 and fworld.ft < 1.0) 1.0 - fworld.ft else 1.0), ox: 0.0, oy: 0.0, uid: ih, tx: "", fs: 0.0 }
+                                                | row _ |> std/store:insert(view) { d: s.d + 2, kind: "text", wk: 0, w: 0.0, hk: 0, h: 0.0, dir: 0, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: if (ih == world.sel) @as(f64, 246.0) else 216.0, g: if (ih == world.sel) @as(f64, 230.0) else 210.0, b: if (ih == world.sel) @as(f64, 196.0) else 224.0, a: 255.0 * (if (ih == world.fu and world.fu >= 0 and fworld.ft < 1.0) 1.0 - fworld.ft else 1.0), ox: 0.0, oy: 0.0, uid: ih, tx: en.tx, fs: 14.0 }
+                                                    | row _ |> std/store:insert(view) { d: s.d + 2, kind: "text", wk: 0, w: 0.0, hk: 0, h: 0.0, dir: 0, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 132.0, g: 128.0, b: 118.0, a: 255.0 * (if (ih == world.fu and world.fu >= 0 and fworld.ft < 1.0) 1.0 - fworld.ft else 1.0), ox: 0.0, oy: 0.0, uid: ih, tx: en.sub, fs: 9.5 }
                                                         | row _
                                     |> if (world.r1 < world.icount)
                                         | then |> std/store:insert(view) { d: s.d + 1, kind: "panel", wk: 1, w: 0.0, hk: 3, h: @as(f64, @floatFromInt(world.icount - world.r1)) * 56.0 - @as(f64, @floatFromInt(s.gap)), dir: 0, gap: 0, padl: 0, padr: 0, padt: 0, padb: 0, ax: 0, ay: 0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, ox: 0.0, oy: 0.0, uid: 0, tx: "", fs: 0.0 }
@@ -314,7 +329,7 @@ oshun:component(seed, spec) {
                             |> std/store:stored { world.seltork: se.tork }
                             |> libs/metal:draw.shadow(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 34.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, blur: 22.0, r: 0.30, g: 0.22, b: 0.10, a: 0.35)
                             |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.94, g: 0.89, b: 0.78, a: 0.97)
-                            |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 40.0, size: 13.0, r: 0.42, g: 0.34, b: 0.20, a: 0.9, text: se.sub)
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 64.0, size: 10.5, r: 0.42, g: 0.34, b: 0.20, a: 0.72, text: se.sub)
                             |> if (se.tork == 0)
                                 | then |> libs/components:hub(win: w, f, text: "bridge", cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0 - 10.0, r: 64.0, glow: 0.75)
                             |> if (se.tork == 1)
@@ -341,14 +356,73 @@ oshun:component(seed, spec) {
                                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 368.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 46.0, a: 1.0)
                             |> if (se.tork == 10 and world.termh >= 0 and world.cface >= 0)
                                 | then |> libs/components/term_termview:termview(f, term: world.termh, face: world.cface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 150.0, t: 1.0, a: 1.0)
-                    |> if (world.frame == 40 and world.live == 0)
+                    // THE FLIGHT — the clicked row's pill travels to the
+                    // header slot; its fill dissolves into bare text.
+                    |> if (world.fu >= 0 and fworld.ft < 1.0)
+                        | then |> std/store:query(entries)
+                            ! query { [row]fe2, [id]fid } when fid == world.fu
+                                |> libs/metal:draw.roundrect(f, x: fworld.rx, y: fworld.ry, w: fworld.rw, h: fworld.rh, radius: 12.0, r: 0.16, g: 0.16, b: 0.24, a: fworld.ba)
+                                |> libs/metal:draw.text(f, x: fworld.rx + 16.0, y: fworld.ry + 13.0, size: 13.0 + fworld.ft * 3.0, r: 0.94 - fworld.ft * 0.49, g: 0.89 - fworld.ft * 0.53, b: 0.78 - fworld.ft * 0.56, a: 1.0, text: fe2.tx)
+                    // THE HEADER — persistent: drawn every frame at the
+                    // stage's top slot regardless of browse/drill state.
+                    |> std/store:query(entries)
+                        ! query { [row]he, [id]hid3 } when hid3 == world.sel
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.45, g: 0.36, b: 0.22, a: fworld.ha, text: he.tx)
+                    |> std/store:query(entries)
+                        ! query { [row]pe, [id]pid3 } when pid3 == world.psel and world.psel != world.sel and world.fu >= 0 and fworld.ft < 1.0
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.55, g: 0.46, b: 0.30, a: (1.0 - fworld.ft) * 0.8, text: pe.tx)
+                    // THE COG — drill affordance, top-right of the stage card.
+                    |> std/store:stored { fworld.cx0: fworld.sx1 - 62.0, fworld.cy0: fworld.sy0 + 34.0, fworld.cw: 34.0, fworld.ch: 24.0 }
+                        |> libs/metal:draw.roundrect(f, x: fworld.sx1 - 62.0, y: fworld.sy0 + 34.0, w: 34.0, h: 24.0, radius: 8.0, r: 0.24 + @as(f64, @floatFromInt(world.coghot)) * 0.10, g: 0.24 + @as(f64, @floatFromInt(world.coghot)) * 0.10, b: 0.32 + @as(f64, @floatFromInt(world.coghot)) * 0.10, a: 0.92)
+                        |> libs/metal:draw.text(f, x: fworld.sx1 - 51.0, y: fworld.sy0 + 39.0, size: 13.0, r: 0.82, g: 0.78, b: 0.70, a: 0.95, text: "i")
+                    // THE DIVE — content recedes under a dim veil; the detail
+                    // sheet rises. The header stays pinned above it all.
+                    |> if (fworld.da > 0.01 or fworld.sa > 0.01)
+                        | then |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 52.0, y: fworld.sy0 + 88.0, w: fworld.sx1 - fworld.sx0 - 104.0, h: fworld.sy1 - fworld.sy0 - 160.0, radius: 16.0, r: 0.05, g: 0.05, b: 0.08, a: fworld.da)
+                            |> std/store:query(entries)
+                                ! query { [row]de, [id]did } when did == world.sel
+                                    |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 84.0, y: fworld.sy0 + 118.0 + fworld.shy, w: fworld.sx1 - fworld.sx0 - 168.0, h: fworld.sy1 - fworld.sy0 - 230.0, radius: 14.0, r: 0.11, g: 0.11, b: 0.15, a: fworld.sa * 0.97)
+                                    |> libs/metal:draw.text(f, x: fworld.sx0 + 108.0, y: fworld.sy0 + 148.0 + fworld.shy, size: 20.0, r: 0.95, g: 0.90, b: 0.80, a: fworld.sa, text: de.tx)
+                                    |> libs/metal:draw.text(f, x: fworld.sx0 + 108.0, y: fworld.sy0 + 178.0 + fworld.shy, size: 11.0, r: 0.72, g: 0.68, b: 0.60, a: fworld.sa, text: de.sub)
+                                    |> libs/metal:draw.text(f, x: fworld.sx0 + 108.0, y: fworld.sy0 + 226.0 + fworld.shy, size: 10.0, r: 0.50, g: 0.48, b: 0.44, a: fworld.sa, text: "kind-dispatched component — catalog family: surface")
+                                    |> libs/metal:draw.text(f, x: fworld.sx0 + 108.0, y: fworld.sy0 + 250.0 + fworld.shy, size: 10.0, r: 0.50, g: 0.48, b: 0.44, a: fworld.sa, text: "registered in components/ — replay-grown via challenges/")
+                                    |> libs/metal:draw.text(f, x: fworld.sx0 + 108.0, y: fworld.sy0 + 274.0 + fworld.shy, size: 10.0, r: 0.50, g: 0.48, b: 0.44, a: fworld.sa, text: "esc or the cog returns to the showcase")
+                    // scripted twin — continued: drill dive, return, re-flight
+                    |> if (world.frame == 42 and world.live == 0)
+                        | then |> libs/metal:input.mouse(x: 955.0, y: 46.0)
+                    |> if (world.frame == 43 and world.live == 0)
+                        | then |> libs/metal:input.up(x: 955.0, y: 46.0)
+                    |> if (world.frame == 46 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_drill_mid.bmp")
+                    |> if (world.frame == 60 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_drill.bmp")
+                    |> if (world.frame == 64 and world.live == 0)
+                        | then |> libs/metal:input.mouse(x: 955.0, y: 46.0)
+                    |> if (world.frame == 65 and world.live == 0)
+                        | then |> libs/metal:input.up(x: 955.0, y: 46.0)
+                    |> if (world.frame == 70 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_back.bmp")
+                    |> if (world.frame == 72 and world.live == 0)
+                        | then |> libs/metal:input.mouse(x: 120.0, y: 436.0)
+                    |> if (world.frame == 73 and world.live == 0)
+                        | then |> libs/metal:input.up(x: 120.0, y: 436.0)
+                    |> if (world.frame == 78 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_flight.bmp")
+                    |> if (world.frame == 90 and world.live == 0)
+                        | then |> libs/metal:window.snap(path: "/tmp/gallery_landed.bmp")
+                    |> if (world.frame == 92 and world.live == 0)
                         | then |> libs/host:quit()
-                ! key-down k when k.code == 53 |> libs/host:quit()
+                ! key-down k when k.code == 53 and world.dive == 0 |> libs/host:quit()
+                ! key-down k when k.code == 53 and world.dive == 1
+                    |> std/store:stored { world.dive: 0 }
+                    |> std/store:stored { fworld.dt0: @as(f64, @floatFromInt(world.frame)) }
                 ! key-down k when world.seltork == 10 and world.termh >= 0
                     |> std/io:print.ln("key code={{ k.code:d }} chars=|{{ k.chars:s }}|")
                     |> libs/vt:term-key(h: world.termh, k.code, k.chars) : _
                 ! mouse-move e
-                    |> std/store:stored { world.mx: @as(i64, @intFromFloat(e.x)), world.my: @as(i64, @intFromFloat(e.y)), world.hover: -1 }
+                    |> std/store:stored { world.mx: @as(i64, @intFromFloat(e.x)), world.my: @as(i64, @intFromFloat(e.y)), world.hover: -1, world.coghot: 0 }
+                    |> if (e.x >= fworld.cx0 and e.x < fworld.cx0 + fworld.cw and e.y >= fworld.cy0 and e.y < fworld.cy0 + fworld.ch)
+                        | then |> std/store:stored { world.coghot: 1 }
                     |> std/store:query(hit)
                         ! query hi when (hi.cl == 0 or e.y >= fworld.ly0 and e.y < fworld.ly1) and e.x >= hi.x and e.x < hi.x + hi.w and e.y >= hi.y and e.y < hi.y + hi.h
                             |> std/store:stored { world.hover: hi.seq }
@@ -363,7 +437,25 @@ oshun:component(seed, spec) {
                         ! query hi when (hi.cl == 0 or e.y >= fworld.ly0 and e.y < fworld.ly1) and world.down == hi.seq and e.x >= hi.x and e.x < hi.x + hi.w and e.y >= hi.y and e.y < hi.y + hi.h
                             |> std/store:query(uids)
                                 ! query u when u.uid == world.down
+                                    // FLIGHT CAPTURE — union the clicked row's
+                                    // hit rects into the chip's source box,
+                                    // then retarget sel/psel/fu/dive.
+                                    |> std/store:stored { fworld.fx0: 1000000.0, fworld.fy0: 1000000.0, fworld.frt: -1000000.0, fworld.fb: -1000000.0 }
+                                    |> std/store:query(hit)
+                                        ! query { [row]hf } when hf.seq == world.down
+                                            |> std/store:stored {
+                                                fworld.fx0: @min(fworld.fx0, hf.x),
+                                                fworld.fy0: @min(fworld.fy0, hf.y),
+                                                fworld.frt: @max(fworld.frt, hf.x + hf.w),
+                                                fworld.fb: @max(fworld.fb, hf.y + hf.h),
+                                            }
+                                    |> std/store:stored { world.psel: world.sel, world.fu: world.down, world.dive: 0 }
+                                    |> std/store:stored { fworld.ft0: @as(f64, @floatFromInt(world.frame)), fworld.dt0: @as(f64, @floatFromInt(world.frame)) }
                                     |> std/store:stored { world.sel: world.down }
+                    // THE COG — manual bounds (stage chrome isn't in hit).
+                    |> if (e.x >= fworld.cx0 and e.x < fworld.cx0 + fworld.cw and e.y >= fworld.cy0 and e.y < fworld.cy0 + fworld.ch)
+                        | then |> std/store:stored { world.dive: 1 - world.dive }
+                            |> std/store:stored { fworld.dt0: @as(f64, @floatFromInt(world.frame)) }
                     |> std/store:stored { world.down: -1 }
                 ! scroll e
                     |> if (e.x >= fworld.lx0 and e.x < fworld.lx1 and e.y >= fworld.ly0 and e.y < fworld.ly1)
