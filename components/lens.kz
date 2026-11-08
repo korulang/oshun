@@ -1,0 +1,31 @@
+// @korulong/components/lens — the refractive glass, kind 5. Where
+// glasscard frosts the captured scene, lens bends the backdrop image
+// itself: bezel width, refraction strength, rim light and chromatic
+// aberration are the material's dials. Shares glasscard's backdrop
+// contract — bx,by,bw,bh is the rect the image was drawn into, so a
+// frost pane and a lens pane over the same rect read as one scene.
+// No capture needed: the shader samples the image atlas directly.
+// `a` is master alpha; `rad` is the pane radius.
+//
+//   lens(win, f, tex, cx, cy, w, h, bx, by, bw, bh, rad, label, face, a)
+//
+// Ink comes from std/ctx(theme): ir/ig/ib.
+
+~import libs/metal
+
+~pub tor lens {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    tex: i64,
+    cx: f64, cy: f64, w: f64, h: f64,
+    bx: f64, by: f64, bw: f64, bh: f64,
+    rad: f64,
+    label: string, face: i64, a: f64,
+    tr: f64, tg: f64, tb: f64, ta: f64,
+    li: f64, lg: f64, lb: f64,
+}
+
+~lens = libs/metal:draw.glass(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, tex, bx, by, bw, bh, bezel: 14.0, refract: 16.0, rim: 6.0, aberr: 0.3, r: tr, g: tg, b: tb, a: ta)
+    // label — measured center, optical middle
+    |> libs/metal:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
+        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)

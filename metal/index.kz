@@ -168,8 +168,10 @@ const msl_src: [:0]const u8 =
     \\// sampled at uv), a Gaussian-blurred shadow box (kind 2), an
     \\// image-atlas rect (kind 3 — RGBA sampled at uv, tinted by color),
     \\// a liquid-glass pane (kind 5 — bezel-lens refraction of the
-    \\// image-atlas backdrop beneath it), or a frosted-glass pane
-    \\// (kind 6 — ground-glass scatter of the captured scene texture).
+    \\// image-atlas backdrop beneath it), a frosted-glass pane
+    \\// (kind 6 — ground-glass scatter of the captured scene texture),
+    \\// or a stroked quadratic Bézier (kind 7 — uv/silk carry the three
+    \\// control points, border_width the stroke width).
     \\// (Kind 4, the pearlescent silk drape, was retired — its hue
     \\// fringe banded on flat panels; flat fills carry the champagne.)
     \\// Each instance clips to its clip rect; clip corners may be rounded.
@@ -247,6 +249,36 @@ const msl_src: [:0]const u8 =
     \\static float inst_rounded_box(float2 p, float2 half_size, float r) {
     \\    float2 q = abs(p) - half_size + r;
     \\    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+    \\}
+    \\// Distance from q to the quadratic Bézier through a, b, c —
+    \\// multi-start Newton on g(t) = (B(t)-q)·B'(t), the standard
+    \\// approach every production bezier SDF uses (iq's sdBezier does the
+    \\// same for the harder cubic case). Six seeds across [0,1]; a
+    \\// quadratic's distance has at most two minima, so the global one
+    \\// always wins. No closed-form cubic — no branch boundaries, no
+    \\// cbrt/acos edge cases to punch holes in. Endpoints included means
+    \\// stroke caps come out round for free.
+    \\static float bez_dist(float2 q, float2 a, float2 b, float2 c) {
+    \\    float2 A = a - 2.0 * b + c;
+    \\    float2 B = 2.0 * (b - a);
+    \\    float2 E = a - q;
+    \\    float best = min(dot(E, E), dot(c - q, c - q));
+    \\    for (int k = 0; k < 6; k++) {
+    \\        float t = float(k) * 0.2;
+    \\        for (int it = 0; it < 6; it++) {
+    \\            float2 r = E + t * (B + t * A);
+    \\            float2 d1 = B + 2.0 * t * A;
+    \\            float g = dot(r, d1);
+    \\            float gp = dot(d1, d1) + dot(r, 2.0 * A);
+    \\            if (abs(gp) < 1e-9) break;
+    \\            float nt = clamp(t - g / gp, 0.0, 1.0);
+    \\            if (abs(nt - t) < 1e-5) { t = nt; break; }
+    \\            t = nt;
+    \\        }
+    \\        float2 r = E + t * (B + t * A);
+    \\        best = min(best, dot(r, r));
+    \\    }
+    \\    return sqrt(best);
     \\}
     \\// Hash value noise — the frost pane's grain layer uses the same
     \\// deterministic hash for its drifting micro-facet twinkle.
@@ -425,6 +457,15 @@ const msl_src: [:0]const u8 =
     \\        float fcov = 1.0 - smoothstep(-faa, faa, d);
     \\        return float4(col, i.color.a * fcov) * clip_cover;
     \\    }
+    \\    if (i.kind == 7.0) {
+    \\        // Stroked quadratic Bézier — i.uv is P0.xy,P1.xy, i.silk.xy
+    \\        // is P2.xy, border_width the full stroke width in points.
+    \\        // Signed distance is distance-to-curve minus half the width.
+    \\        float sd = bez_dist(in.world, i.uv.xy, i.uv.zw, i.silk.xy) - i.border_width * 0.5;
+    \\        float aa = max(fwidth(sd), 0.0001) * 0.5;
+    \\        float cov = 1.0 - smoothstep(-aa, aa, sd);
+    \\        return float4(i.color.rgb, i.color.a * cov) * clip_cover;
+    \\    }
     \\    float aa = max(fwidth(d), 0.0001) * 0.5;
     \\    float coverage = 1.0 - smoothstep(-aa, aa, d);
     \\    float4 c = i.color;
@@ -481,6 +522,7 @@ const inst_shadow: f32 = 2;
 const inst_image: f32 = 3;
 const inst_glass: f32 = 5;
 const inst_frost: f32 = 6;
+const inst_stroke: f32 = 7;
 
 // A clip rect as the shader reads it: x0,y0,x1,y1. An empty stack means the
 // huge unclipped rect — cheap in the fragment (four compares).
@@ -488,7 +530,18 @@ const no_clip: [4]f32 = .{ -1e6, -1e6, 1e6, 1e6 };
 
 fn curClip(f: *const Frame) [4]f32 {
     if (f.clip_depth == 0) return no_clip;
-    return f.clip_stack[f.clip_depth - 1];
+    const e = f.clip_stack[f.clip_depth - 1];
+    return .{ e[0], e[1], e[2], e[3] };
+}
+
+// Packed clip_round for instances: corners bitmask (all four = 15)
+// times 4096 plus radius, matching the shader's decode. Innermost clip
+// wins — a square clip inside a rounded one drops the rounding.
+fn clipRound(f: *const Frame) f32 {
+    if (f.clip_depth == 0) return 0;
+    const r = f.clip_stack[f.clip_depth - 1][4];
+    if (r <= 0) return 0;
+    return 15.0 * 4096.0 + r;
 }
 
 fn instPush(f: *Frame, inst: GpuInstance) void {
@@ -1572,7 +1625,7 @@ pub const Frame = struct {
     // Running count of instances flushed this frame — the owner (window or
     // surface) resets it per frame; offscreen.frame returns it as `insts`.
     flushed: *usize,
-    clip_stack: [16][4]f32,
+    clip_stack: [16][5]f32,
     clip_depth: u8,
     text: *TextSystem,
     images: *ImageAtlas,
@@ -2341,7 +2394,7 @@ pub const Surface = struct {
         .radius = 0,
         .border_width = 0,
         .kind = inst_quad,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
 }
@@ -2360,7 +2413,7 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = 0,
         .kind = inst_quad,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
 }
@@ -2380,8 +2433,61 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = @floatCast(bw),
         .kind = inst_quad,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// A stroked quadratic Bézier — P0→P2 with control point P1, `w` the full
+// stroke width in points. The instance's rect is the curve's tight bbox
+// (endpoints plus each axis' derivative root) padded by half the width
+// and an AA margin; the fragment shader measures true distance-to-curve,
+// so caps come out round and width stays constant through the bend.
+~pub tor draw.bezier { f: *Frame<frame>, x0: f64, y0: f64, x1: f64, y1: f64, x2: f64, y2: f64, w: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.bezier|zig {
+    const ax = x0 - 2.0 * x1 + x2;
+    const ay = y0 - 2.0 * y1 + y2;
+    const bx = 2.0 * (x1 - x0);
+    const by = 2.0 * (y1 - y0);
+    var minx = @min(x0, x2);
+    var maxx = @max(x0, x2);
+    var miny = @min(y0, y2);
+    var maxy = @max(y0, y2);
+    if (ax != 0.0) {
+        const t = -bx / (2.0 * ax);
+        if (t > 0.0 and t < 1.0) {
+            const px = x0 + t * (bx + t * ax);
+            const py = y0 + t * (by + t * ay);
+            minx = @min(minx, px);
+            maxx = @max(maxx, px);
+            miny = @min(miny, py);
+            maxy = @max(maxy, py);
+        }
+    }
+    if (ay != 0.0) {
+        const t = -by / (2.0 * ay);
+        if (t > 0.0 and t < 1.0) {
+            const px = x0 + t * (bx + t * ax);
+            const py = y0 + t * (by + t * ay);
+            minx = @min(minx, px);
+            maxx = @max(maxx, px);
+            miny = @min(miny, py);
+            maxy = @max(maxy, py);
+        }
+    }
+    const pad = @abs(w) * 0.5 + 1.0;
+    instPush(f, .{
+        .rect = .{ @floatCast(minx - pad), @floatCast(miny - pad), @floatCast(maxx - minx + 2.0 * pad), @floatCast(maxy - miny + 2.0 * pad) },
+        .color = .{ @floatCast(r), @floatCast(g), @floatCast(b), @floatCast(a) },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = .{ @floatCast(x0), @floatCast(y0), @floatCast(x1), @floatCast(y1) },
+        .clip = curClip(f),
+        .radius = 0,
+        .border_width = @floatCast(w),
+        .kind = inst_stroke,
+        .clip_round = clipRound(f),
+        .silk = .{ @floatCast(x2), @floatCast(y2), 0, 0 },
     });
 }
 
@@ -2400,7 +2506,7 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = @floatCast(blur),
         .kind = inst_shadow,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
 }
@@ -2439,7 +2545,7 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = 0,
         .kind = inst_glass,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ @floatCast(bezel), @floatCast(refract), @floatCast(rim), @floatCast(aberr) },
     });
 }
@@ -2511,7 +2617,7 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = 0,
         .kind = inst_frost,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ @floatCast(rough), @floatCast(edge), @floatCast(grain), @floatCast(milk) },
     });
 }
@@ -2534,7 +2640,30 @@ pub const Surface = struct {
         x1 = @min(x1, parent[2]);
         y1 = @min(y1, parent[3]);
     }
-    f.clip_stack[f.clip_depth] = .{ x0, y0, x1, y1 };
+    f.clip_stack[f.clip_depth] = .{ x0, y0, x1, y1, 0.0 };
+    f.clip_depth += 1;
+}
+
+// Rounded clip — same rect intersect as clip.push but the region keeps
+// rounded corners (radius in points, clamped to half the smaller side by
+// the shader). Instances drawn inside inherit the rounding through
+// clip_round; pop restores whatever was underneath.
+~pub tor draw.clip.push.round { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64 }
+
+~proc draw.clip.push.round|zig {
+    if (f.clip_depth >= f.clip_stack.len) return;
+    var x0: f32 = @floatCast(x);
+    var y0: f32 = @floatCast(y);
+    var x1: f32 = x0 + @as(f32, @floatCast(w));
+    var y1: f32 = y0 + @as(f32, @floatCast(h));
+    if (f.clip_depth > 0) {
+        const parent = f.clip_stack[f.clip_depth - 1];
+        x0 = @max(x0, parent[0]);
+        y0 = @max(y0, parent[1]);
+        x1 = @min(x1, parent[2]);
+        y1 = @min(y1, parent[3]);
+    }
+    f.clip_stack[f.clip_depth] = .{ x0, y0, x1, y1, @floatCast(radius) };
     f.clip_depth += 1;
 }
 
@@ -2576,7 +2705,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
             .radius = 0,
             .border_width = 0,
             .kind = inst_text,
-            .clip_round = 0,
+            .clip_round = clipRound(f),
             .silk = .{ 0, 0, 0, 0 },
         });
     }
@@ -2785,7 +2914,7 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
         .radius = 0,
         .border_width = 0,
         .kind = inst_image,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
 }
@@ -2810,7 +2939,47 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
         .radius = 0,
         .border_width = 0,
         .kind = inst_image,
-        .clip_round = 0,
+        .clip_round = clipRound(f),
+        .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// Cover-fit image — aspect preserved, overflow center-cropped. The quad
+// stays the caller's w×h; the atlas uv insets to the visible sub-rect so
+// the shader samples only what cover would show. For glass backdrops and
+// anywhere a photo must fill uniformly rather than stretch.
+~pub tor draw.imagecover { f: *Frame<frame>, tex: i64, x: f64, y: f64, w: f64, h: f64 }
+
+~proc draw.imagecover|zig {
+    const handle: u32 = @intCast(tex);
+    if (handle == 0 or handle > decoded_images.items.len) @panic("metal: draw.imagecover with an invalid image handle");
+    const img = decoded_images.items[handle - 1];
+    if (!img.live) return;
+    const uv = f.images.slot(handle, img) orelse return;
+    const iw: f64 = @floatFromInt(img.w);
+    const ih: f64 = @floatFromInt(img.h);
+    const tw: f64 = @floatCast(w);
+    const th: f64 = @floatCast(h);
+    const s = @max(tw / iw, th / ih);
+    const dw = iw * s;
+    const dh = ih * s;
+    const fx = tw / dw;
+    const fy = th / dh;
+    const cu = (uv[2] - uv[0]) * (1.0 - fx) * 0.5;
+    const cv = (uv[3] - uv[1]) * (1.0 - fy) * 0.5;
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ 1, 1, 1, 1 },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = .{
+            @as(f32, @floatCast(uv[0] + cu)), @as(f32, @floatCast(uv[1] + cv)),
+            @as(f32, @floatCast(uv[2] - cu)), @as(f32, @floatCast(uv[3] - cv)),
+        },
+        .clip = curClip(f),
+        .radius = 0,
+        .border_width = 0,
+        .kind = inst_image,
+        .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
 }

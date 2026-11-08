@@ -31,6 +31,12 @@ import libs/components/code_codeview
 import libs/components/code_diffview
 import libs/components/code_turnview
 import libs/components/term_termview
+import libs/components/flow
+import libs/components/dome
+import libs/components/glasscard
+import libs/components/lens
+import libs/components/avatar
+import libs/math
 import libs/vt
 import app/omni_img
 import oshun
@@ -40,6 +46,7 @@ import std/store
 import std/io
 import std/string
 import std/fmt
+import std/ctx
 
 std/store:new(world) {
     frame: 0[i64], sel: -1[i64], hover: -1[i64], down: -1[i64],
@@ -47,8 +54,10 @@ std/store:new(world) {
     mx: -1.0[i64], my: -1.0[i64], pdown: 0[i64],
     stageh: -1[i64], wavslot: -1[i64], docslot: -1[i64],
     codeslot: -1[i64], diffslot: -1[i64], termh: -1[i64], seltork: -1[i64], termsel: -1[i64],
-    tex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
+    tex: -1[i64], gtex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
     fu: -1[i64], psel: -1[i64], dive: 0[i64], coghot: 0[i64],
+    mood: 0[i64], atork: -1[i64],
+    v0: -1[i64], v1: -1[i64], v2: -1[i64], v3: -1[i64],
 }
 std/store:new(fworld) {
     scroll: 0.0[f64],
@@ -57,7 +66,8 @@ std/store:new(fworld) {
     cx0: 0.0[f64], cy0: 0.0[f64], cw: 0.0[f64], ch: 0.0[f64],
     ft: 0.0[f64], fe: 0.0[f64], fx0: 0.0[f64], fy0: 0.0[f64], frt: 0.0[f64], fb: 0.0[f64],
     rx: 0.0[f64], ry: 0.0[f64], rw: 0.0[f64], rh: 0.0[f64], ba: 0.0[f64], ha: 1.0[f64],
-    dt: 0.0[f64], da: 0.0[f64], sa: 0.0[f64], shy: 0.0[f64], ft0: 0.0[f64], dt0: 0.0[f64],
+    dt: 0.0[f64], da: 0.0[f64], sa: 0.0[f64], shy: 0.0[f64], ft0: 0.0[f64], dt0: -1000.0[f64],
+    ddx: 0.0[f64], ddy: 0.0[f64],
 }
 std/store:new(wins) { w: 1000.0[f64], h: 620.0[f64] }
 std/store:new(hit, capacity: 128) { seq: i64, cl: i64, x: f64, y: f64, w: f64, h: f64 }
@@ -69,6 +79,18 @@ std/store:new(uids, capacity: 256) { uid: i64 }
 // The catalog — one row per showcased component. tork selects the
 // dispatch arm; tx is the tor's name, sub its one-line claim.
 std/store:new(entries, capacity: 64) { tx: char[24], sub: char[44], tork: i64 }
+
+// The theme — a blue-tinted paper. std/ctx(theme) fills same-named
+// unfilled params at compile time, so ctx-aware components draw from
+// the palette instead of hardcoding color. Field names ARE the param
+// names: pr/pg/pb paper, kr/kg/kb key, rr/rg/rb rim, ir/ig/ib ink.
+std/store:new(theme) {
+    pr: 0.90[f64], pg: 0.92[f64], pb: 0.96[f64],
+    kr: 0.94[f64], kg: 0.95[f64], kb: 0.98[f64],
+    rr: 0.30[f64], rg: 0.50[f64], rb: 0.80[f64],
+    ir: 0.14[f64], ig: 0.18[f64], ib: 0.26[f64],
+    li: 1.0[f64], lg: 1.0[f64], lb: 1.0[f64],
+}
 
 // The AUTHORED tree — spec rows in DFS order.
 [tree]std/store:new(spec, capacity: 64) {
@@ -116,21 +138,40 @@ oshun:component(seed, spec) {
                 | result _ |> std/io:print.ln("gallery: resources minted")
                 | partial p |> std/io:print.ln("mint partial: {{ p.report:s }}")
                 | error e |> std/io:print.ln("mint turn failed: {{ e.message:s }}")
-            |> libs/metal:font.load(win: w, path: "/tmp/archivo/Archivo_Black/ArchivoBlack-Regular.ttf")
+            |> libs/metal:font.load(win: w, path: "/Users/larsde/Downloads/SF-Pro.ttf")
                 | font fc |> std/store:stored { world.face: fc }
                 | err fe |> std/io:print.ln(fe)
             |> libs/metal:image.load(win: w, path: "/Users/larsde/Downloads/apple-remote.png")
                 | img itx |> std/store:stored { world.tex: itx }
                 | err ie |> std/io:print.ln(ie)
+            // The dome's glass needs a real photograph behind it —
+            // frost samples the captured scene, flat fills read as milk.
+            |> libs/metal:image.load(win: w, path: "/Users/larsde/Downloads/86474.jpg")
+                | img gtx |> std/store:stored { world.gtex: gtx }
+                | err ge |> std/io:print.ln(ge)
+            // Victoria's faces — the avatar entry's mood set. Four
+            // distinct portraits; mood buttons swap the medallion.
+            |> libs/metal:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/neutral_albedo.png")
+                | img v0x |> std/store:stored { world.v0: v0x }
+                | err v0e |> std/io:print.ln(v0e)
+            |> libs/metal:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/smiling_albedo.jpg")
+                | img v1x |> std/store:stored { world.v1: v1x }
+                | err v1e |> std/io:print.ln(v1e)
+            |> libs/metal:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/worried_albedo.png")
+                | img v2x |> std/store:stored { world.v2: v2x }
+                | err v2e |> std/io:print.ln(v2e)
+            |> libs/metal:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/determined_albedo.png")
+                | img v3x |> std/store:stored { world.v3: v3x }
+                | err v3e |> std/io:print.ln(v3e)
             // The code-surface components carry their own registry-side
             // font seams — one SF Mono face each, loaded through them.
-            |> libs/components/code_codeview:code-font(path: "/System/Library/Fonts/SFNSMono.ttf")
+            |> libs/components/code_codeview:code-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
                 | font cfn |> std/store:stored { world.cface: cfn }
                 | err cfe |> std/io:print.ln(cfe)
-            |> libs/components/code_diffview:diff-font(path: "/System/Library/Fonts/SFNSMono.ttf")
+            |> libs/components/code_diffview:diff-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
                 | font dfn |> std/store:stored { world.dface: dfn }
                 | err dfe |> std/io:print.ln(dfe)
-            |> libs/components/code_turnview:tv-font(path: "/System/Library/Fonts/SFNSMono.ttf")
+            |> libs/components/code_turnview:tv-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
                 | font tfn |> std/store:stored { world.tface: tfn }
                 | err tfe |> std/io:print.ln(tfe)
             |> libs/components/code_diffview:diff-load(path: "/tmp/code_diffview_sample.diff")
@@ -144,10 +185,10 @@ oshun:component(seed, spec) {
                     // header fade-in, and the drill dive's dim/sheet alphas.
                     // stored{} args may not read sibling fields written in
                     // the same call — dependency-ordered calls below.
-                    |> std/store:stored { fworld.ft: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.ft0) / 18.0, 0.0), 1.0), fworld.dt: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.dt0) / 14.0, 0.0), 1.0) }
-                    |> std/store:stored { fworld.fe: 1.0 - (1.0 - fworld.ft) * (1.0 - fworld.ft) * (1.0 - fworld.ft) }
-                    |> std/store:stored { fworld.rx: fworld.fx0 + (fworld.sx0 + 44.0 - fworld.fx0) * fworld.fe, fworld.ry: fworld.fy0 + (fworld.sy0 + 34.0 - fworld.fy0) * fworld.fe, fworld.rw: (fworld.frt - fworld.fx0) + (190.0 - (fworld.frt - fworld.fx0)) * fworld.fe, fworld.rh: (fworld.fb - fworld.fy0) + (44.0 - (fworld.fb - fworld.fy0)) * fworld.fe }
-                    |> std/store:stored { fworld.ba: 0.92 * (1.0 - @min(@max((fworld.ft - 0.62) / 0.38, 0.0), 1.0)), fworld.ha: if (world.fu >= 0) @min(@max((fworld.ft - 0.75) / 0.25, 0.0), 1.0) else 1.0 }
+                    |> std/store:stored { fworld.ft: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.ft0) / 36.0, 0.0), 1.0), fworld.dt: @min(@max((@as(f64, @floatFromInt(world.frame)) - fworld.dt0) / 14.0, 0.0), 1.0) }
+                    |> std/store:stored { fworld.fe: 1.0 + 2.70158 * (fworld.ft - 1.0) * (fworld.ft - 1.0) * (fworld.ft - 1.0) + 1.70158 * (fworld.ft - 1.0) * (fworld.ft - 1.0) }
+                    |> std/store:stored { fworld.rx: fworld.fx0 + (fworld.sx0 + 44.0 - fworld.fx0) * fworld.fe, fworld.ry: fworld.fy0 + (fworld.sy0 + 34.0 - fworld.fy0) * fworld.fe, fworld.rw: (fworld.frt - fworld.fx0) + (150.0 - (fworld.frt - fworld.fx0)) * fworld.fe, fworld.rh: (fworld.fb - fworld.fy0) + (34.0 - (fworld.fb - fworld.fy0)) * fworld.fe }
+                    |> std/store:stored { fworld.ba: 0.92 * (1.0 - @min(@max((fworld.ft - 0.5) / 0.5, 0.0), 1.0)), fworld.ha: if (world.fu >= 0) @min(@max((fworld.ft - 0.75) / 0.25, 0.0), 1.0) else 1.0 }
                     |> std/store:stored { fworld.da: (if (world.dive == 1) fworld.dt else 1.0 - fworld.dt) * 0.62, fworld.sa: if (world.dive == 1) fworld.dt else 1.0 - fworld.dt, fworld.shy: (if (world.dive == 1) 1.0 - fworld.dt else fworld.dt) * 26.0 }
                     |> std/store:clear(hit)
                     |> std/store:clear(view)
@@ -158,8 +199,15 @@ oshun:component(seed, spec) {
                     // Seed the catalog once; first row's handle is the
                     // landing selection.
                     |> if (world.frame == 1)
-                        | then |> std/store:insert(entries) { tx: "hub", sub: "the bridge's presence — pearl orb", tork: 0 }
+                        | then |> std/store:insert(entries) { tx: "flow", sub: "draw.bezier — stroked quadratic curves", tork: 11 }
                             | row h0 |> std/store:stored { world.sel: h0 }
+                            |> std/store:insert(entries) { tx: "dome", sub: "neumorphism × glass — soft chrome", tork: 12 }
+                                | row _
+                            |> std/store:insert(entries) { tx: "glass", sub: "cover-fit photo + frost pane — the minimum", tork: 13 }
+                            |> std/store:insert(entries) { tx: "avatar", sub: "round portrait — mood buttons", tork: 14 }
+                                | row _
+                            |> std/store:insert(entries) { tx: "hub", sub: "the bridge's presence — pearl orb", tork: 0 }
+                                | row _
                             |> std/store:insert(entries) { tx: "button", sub: "pressable pill — hover, press, variants", tork: 1 }
                                 | row _
                             |> std/store:insert(entries) { tx: "caption", sub: "ink-on-silk centered text", tork: 2 }
@@ -327,9 +375,9 @@ oshun:component(seed, spec) {
                     |> std/store:query(entries)
                         ! query { [row]se, [id]sid } when sid == world.sel
                             |> std/store:stored { world.seltork: se.tork }
-                            |> libs/metal:draw.shadow(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 34.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, blur: 22.0, r: 0.30, g: 0.22, b: 0.10, a: 0.35)
-                            |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.94, g: 0.89, b: 0.78, a: 0.97)
-                            |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 64.0, size: 10.5, r: 0.42, g: 0.34, b: 0.20, a: 0.72, text: se.sub)
+                            |> libs/metal:draw.shadow(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 34.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, blur: 22.0, r: 0.38, g: 0.45, b: 0.58, a: 0.35)
+                            |> libs/metal:draw.roundrect(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 18.0, r: 0.90, g: 0.92, b: 0.96, a: 0.97)
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 44.0, y: fworld.sy0 + 64.0, size: 10.5, r: 0.38, g: 0.45, b: 0.58, a: 0.72, text: se.sub)
                             |> if (se.tork == 0)
                                 | then |> libs/components:hub(win: w, f, text: "bridge", cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0 - 10.0, r: 64.0, glow: 0.75)
                             |> if (se.tork == 1)
@@ -339,7 +387,7 @@ oshun:component(seed, spec) {
                             |> if (se.tork == 2)
                                 | then |> libs/components:caption(win: w, f, text: "custody is a first-class value", cx: (fworld.sx0 + fworld.sx1) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0, a: 0.85)
                             |> if (se.tork == 3)
-                                | then |> libs/components:wordmark(win: w, f, world.face, text: "OMNI", size: 34.0, cx: (fworld.sx0 + fworld.sx1) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 - 20.0, r: 0.16, g: 0.12, b: 0.08, a: 0.95)
+                                | then |> libs/components:wordmark(win: w, f, world.face, text: "OMNI", size: 34.0, cx: (fworld.sx0 + fworld.sx1) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 - 20.0, r: 0.14, g: 0.18, b: 0.26, a: 0.95)
                             |> if (se.tork == 4 and world.tex >= 0)
                                 | then |> libs/components:remote(f, world.tex, cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0, h: 300.0, glow: 0.7)
                             |> if (se.tork == 5 and world.wavslot >= 0)
@@ -356,21 +404,81 @@ oshun:component(seed, spec) {
                                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 368.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 46.0, a: 1.0)
                             |> if (se.tork == 10 and world.termh >= 0 and world.cface >= 0)
                                 | then |> libs/components/term_termview:termview(f, term: world.termh, face: world.cface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 150.0, t: 1.0, a: 1.0)
+                            // atork mirrors the live selection so mouse-down
+                            // can hit-test stage buttons (mood pills) that
+                            // aren't in the sidebar hit store.
+                            |> std/store:stored { world.atork: se.tork }
+                            |> if (se.tork == 11)
+                                | then |> libs/components/flow:flow(f, cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 160.0, t: @as(f64, @floatFromInt(world.frame)) / 60.0, a: 1.0)
+                            |> if (se.tork == 12 and world.gtex >= 0)
+                                | then |> std/ctx(theme)
+                                    |> libs/components/dome:dome(win: w, f, tex: world.gtex, cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0, w: fworld.sx1 - fworld.sx0 - 160.0, h: fworld.sy1 - fworld.sy0 - 180.0, label: "dome", world.face, t: @as(f64, @floatFromInt(world.frame)) / 60.0, a: 1.0)
+                            // THE DRIFT — the backdrop rect wanders ±~25pt
+                            // on ~2-minute sines; large amplitude, glacial
+                            // pace. Caller owns it so frost capture and
+                            // lens refraction sample the SAME moving photo.
+                            |> if (se.tork == 13 and world.gtex >= 0)
+                                | then |> libs/math:sin(x: @as(f64, @floatFromInt(world.frame)) / 60.0 * 0.21) : d1
+                                    |> libs/math:sin(x: @as(f64, @floatFromInt(world.frame)) / 60.0 * 0.14 + 2.1) : d2
+                                    |> libs/math:sin(x: @as(f64, @floatFromInt(world.frame)) / 60.0 * 0.19 + 1.7) : d3
+                                    |> libs/math:sin(x: @as(f64, @floatFromInt(world.frame)) / 60.0 * 0.12 + 0.6) : d4
+                                    |> std/store:stored { fworld.ddx: d1 * 60.0 + d2 * 15.0, fworld.ddy: d3 * 45.0 + d4 * 12.0 }
+                                    |> std/ctx(theme)
+                                    // the drifting backdrop bleeds past the stage
+                                    // card — clip it back inside or it paints over
+                                    // the sidebar. Containment, not z-order.
+                                    |> libs/metal:draw.clip.push(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0)
+                                    |> libs/components/glasscard:glasscard(win: w, f, tex: world.gtex, cx: (fworld.sx0 + fworld.sx1) / 2.0 - 115.0, cy: (fworld.sy0 + fworld.sy1) / 2.0, w: 210.0, h: 58.0, bx: fworld.sx0 + 24.0 - 110.0 + fworld.ddx, by: fworld.sy0 + 24.0 - 110.0 + fworld.ddy, bw: fworld.sx1 - fworld.sx0 - 48.0 + 220.0, bh: fworld.sy1 - fworld.sy0 - 48.0 + 220.0, rad: 29.0, label: "frost", world.face, a: 1.0, li: 1.0, lg: 1.0, lb: 1.0)
+                                    |> libs/components/lens:lens(win: w, f, tex: world.gtex, cx: (fworld.sx0 + fworld.sx1) / 2.0 + 115.0, cy: (fworld.sy0 + fworld.sy1) / 2.0, w: 210.0, h: 58.0, bx: fworld.sx0 + 24.0 - 110.0 + fworld.ddx, by: fworld.sy0 + 24.0 - 110.0 + fworld.ddy, bw: fworld.sx1 - fworld.sx0 - 48.0 + 220.0, bh: fworld.sy1 - fworld.sy0 - 48.0 + 220.0, rad: 29.0, label: "lens", world.face, a: 1.0, tr: 0.10, tg: 0.12, tb: 0.17, ta: 0.55, li: 1.0, lg: 1.0, lb: 1.0)
+                                    |> libs/metal:draw.clip.pop(f)
+                            // AVATAR — the medallion swaps faces on world.mood;
+                            // four pills below are the mood buttons (hit-tested
+                            // in mouse-down against the same rects drawn here).
+                            |> if (se.tork == 14)
+                                | then |> std/ctx(theme)
+                                    // blurred portrait backdrop — her neutral
+                                    // face frosted heavy; the medallion stays crisp
+                                    |> libs/metal:draw.imagecover(f, tex: world.v0, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0)
+                                    |> libs/metal:draw.capture(f)
+                                    |> libs/metal:draw.frost(f, x: fworld.sx0 + 24.0, y: fworld.sy0 + 24.0, w: fworld.sx1 - fworld.sx0 - 48.0, h: fworld.sy1 - fworld.sy0 - 48.0, radius: 20.0, rough: 18.0, edge: 16.0, grain: 0.16, milk: 0.55, r: 0.82, g: 0.88, b: 0.96, a: 0.9)
+                                    |> libs/components/avatar:avatar(win: w, f, tex: if (world.mood == 0) world.v0 else (if (world.mood == 1) world.v1 else (if (world.mood == 2) world.v2 else world.v3)), cx: (fworld.sx0 + fworld.sx1) / 2.0, cy: (fworld.sy0 + fworld.sy1) / 2.0 - 40.0, d: 150.0, name: "victoria", world.face, a: 1.0)
+                                    // mood pills — frost over the blurred portrait;
+                                    // selected gets a rim. Same rects mouse-down tests.
+                                    |> libs/metal:draw.frost(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 202.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, rough: 8.0, edge: 8.0, grain: 0.10, milk: 0.30, r: 0.85, g: 0.90, b: 0.97, a: 0.85)
+                                    |> if (world.mood == 0)
+                                        | then |> libs/metal:draw.panel(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 202.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 1.5, br: theme.rr, bg: theme.rg, bb: theme.rb, ba: 0.9)
+                                    |> libs/metal:text.offset(win: w, text: "neutral", size: 13.0, world.face, index: 7) : pw0
+                                        |> libs/metal:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 202.0 + (92.0 - pw0) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "neutral")
+                                    |> libs/metal:draw.frost(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 98.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, rough: 8.0, edge: 8.0, grain: 0.10, milk: 0.30, r: 0.85, g: 0.90, b: 0.97, a: 0.85)
+                                    |> if (world.mood == 1)
+                                        | then |> libs/metal:draw.panel(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 98.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 1.5, br: theme.rr, bg: theme.rg, bb: theme.rb, ba: 0.9)
+                                    |> libs/metal:text.offset(win: w, text: "smiling", size: 13.0, world.face, index: 7) : pw1
+                                        |> libs/metal:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 - 98.0 + (92.0 - pw1) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "smiling")
+                                    |> libs/metal:draw.frost(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 6.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, rough: 8.0, edge: 8.0, grain: 0.10, milk: 0.30, r: 0.85, g: 0.90, b: 0.97, a: 0.85)
+                                    |> if (world.mood == 2)
+                                        | then |> libs/metal:draw.panel(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 6.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 1.5, br: theme.rr, bg: theme.rg, bb: theme.rb, ba: 0.9)
+                                    |> libs/metal:text.offset(win: w, text: "worried", size: 13.0, world.face, index: 7) : pw2
+                                        |> libs/metal:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 6.0 + (92.0 - pw2) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "worried")
+                                    |> libs/metal:draw.frost(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, rough: 8.0, edge: 8.0, grain: 0.10, milk: 0.30, r: 0.85, g: 0.90, b: 0.97, a: 0.85)
+                                    |> if (world.mood == 3)
+                                        | then |> libs/metal:draw.panel(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 1.5, br: theme.rr, bg: theme.rg, bb: theme.rb, ba: 0.9)
+                                    |> libs/metal:text.offset(win: w, text: "determined", size: 13.0, world.face, index: 10) : pw3
+                                        |> libs/metal:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0 + (92.0 - pw3) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "determined")
                     // THE FLIGHT — the clicked row's pill travels to the
                     // header slot; its fill dissolves into bare text.
                     |> if (world.fu >= 0 and fworld.ft < 1.0)
                         | then |> std/store:query(entries)
                             ! query { [row]fe2, [id]fid } when fid == world.fu
                                 |> libs/metal:draw.roundrect(f, x: fworld.rx, y: fworld.ry, w: fworld.rw, h: fworld.rh, radius: 12.0, r: 0.16, g: 0.16, b: 0.24, a: fworld.ba)
-                                |> libs/metal:draw.text(f, x: fworld.rx + 16.0, y: fworld.ry + 13.0, size: 13.0 + fworld.ft * 3.0, r: 0.94 - fworld.ft * 0.49, g: 0.89 - fworld.ft * 0.53, b: 0.78 - fworld.ft * 0.56, a: 1.0, text: fe2.tx)
+                                |> libs/metal:draw.text(f, x: fworld.rx + 13.0, y: fworld.ry + 9.0, size: 12.0 + fworld.ft * 4.0, r: 0.94 - fworld.ft * 0.49, g: 0.89 - fworld.ft * 0.53, b: 0.78 - fworld.ft * 0.56, a: 1.0, text: fe2.tx)
                     // THE HEADER — persistent: drawn every frame at the
                     // stage's top slot regardless of browse/drill state.
                     |> std/store:query(entries)
                         ! query { [row]he, [id]hid3 } when hid3 == world.sel
-                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.45, g: 0.36, b: 0.22, a: fworld.ha, text: he.tx)
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.40, g: 0.47, b: 0.60, a: fworld.ha, text: he.tx)
                     |> std/store:query(entries)
                         ! query { [row]pe, [id]pid3 } when pid3 == world.psel and world.psel != world.sel and world.fu >= 0 and fworld.ft < 1.0
-                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.55, g: 0.46, b: 0.30, a: (1.0 - fworld.ft) * 0.8, text: pe.tx)
+                            |> libs/metal:draw.text(f, x: fworld.sx0 + 60.0, y: fworld.sy0 + 46.0, size: 16.0, r: 0.48, g: 0.54, b: 0.64, a: (1.0 - fworld.ft) * 0.8, text: pe.tx)
                     // THE COG — drill affordance, top-right of the stage card.
                     |> std/store:stored { fworld.cx0: fworld.sx1 - 62.0, fworld.cy0: fworld.sy0 + 34.0, fworld.cw: 34.0, fworld.ch: 24.0 }
                         |> libs/metal:draw.roundrect(f, x: fworld.sx1 - 62.0, y: fworld.sy0 + 34.0, w: 34.0, h: 24.0, radius: 8.0, r: 0.24 + @as(f64, @floatFromInt(world.coghot)) * 0.10, g: 0.24 + @as(f64, @floatFromInt(world.coghot)) * 0.10, b: 0.32 + @as(f64, @floatFromInt(world.coghot)) * 0.10, a: 0.92)
@@ -408,9 +516,9 @@ oshun:component(seed, spec) {
                         | then |> libs/metal:input.up(x: 120.0, y: 436.0)
                     |> if (world.frame == 78 and world.live == 0)
                         | then |> libs/metal:window.snap(path: "/tmp/gallery_flight.bmp")
-                    |> if (world.frame == 90 and world.live == 0)
+                    |> if (world.frame == 112 and world.live == 0)
                         | then |> libs/metal:window.snap(path: "/tmp/gallery_landed.bmp")
-                    |> if (world.frame == 92 and world.live == 0)
+                    |> if (world.frame == 115 and world.live == 0)
                         | then |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 0 |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 1
@@ -428,6 +536,15 @@ oshun:component(seed, spec) {
                             |> std/store:stored { world.hover: hi.seq }
                 ! mouse-down e
                     |> std/store:stored { world.pdown: 1, world.down: -1 }
+                    // AVATAR mood pills — same rects the tork-14 arm draws.
+                    |> if (world.atork == 14 and e.x >= (fworld.sx0 + fworld.sx1) / 2.0 - 202.0 and e.x < (fworld.sx0 + fworld.sx1) / 2.0 - 110.0 and e.y >= (fworld.sy0 + fworld.sy1) / 2.0 + 94.0 and e.y < (fworld.sy0 + fworld.sy1) / 2.0 + 126.0)
+                        | then |> std/store:stored { world.mood: 0 }
+                    |> if (world.atork == 14 and e.x >= (fworld.sx0 + fworld.sx1) / 2.0 - 98.0 and e.x < (fworld.sx0 + fworld.sx1) / 2.0 - 6.0 and e.y >= (fworld.sy0 + fworld.sy1) / 2.0 + 94.0 and e.y < (fworld.sy0 + fworld.sy1) / 2.0 + 126.0)
+                        | then |> std/store:stored { world.mood: 1 }
+                    |> if (world.atork == 14 and e.x >= (fworld.sx0 + fworld.sx1) / 2.0 + 6.0 and e.x < (fworld.sx0 + fworld.sx1) / 2.0 + 98.0 and e.y >= (fworld.sy0 + fworld.sy1) / 2.0 + 94.0 and e.y < (fworld.sy0 + fworld.sy1) / 2.0 + 126.0)
+                        | then |> std/store:stored { world.mood: 2 }
+                    |> if (world.atork == 14 and e.x >= (fworld.sx0 + fworld.sx1) / 2.0 + 110.0 and e.x < (fworld.sx0 + fworld.sx1) / 2.0 + 202.0 and e.y >= (fworld.sy0 + fworld.sy1) / 2.0 + 94.0 and e.y < (fworld.sy0 + fworld.sy1) / 2.0 + 126.0)
+                        | then |> std/store:stored { world.mood: 3 }
                     |> std/store:query(hit)
                         ! query hi when (hi.cl == 0 or e.y >= fworld.ly0 and e.y < fworld.ly1) and e.x >= hi.x and e.x < hi.x + hi.w and e.y >= hi.y and e.y < hi.y + hi.h
                             |> std/store:stored { world.down: hi.seq }
@@ -449,8 +566,9 @@ oshun:component(seed, spec) {
                                                 fworld.frt: @max(fworld.frt, hf.x + hf.w),
                                                 fworld.fb: @max(fworld.fb, hf.y + hf.h),
                                             }
-                                    |> std/store:stored { world.psel: world.sel, world.fu: world.down, world.dive: 0 }
-                                    |> std/store:stored { fworld.ft0: @as(f64, @floatFromInt(world.frame)), fworld.dt0: @as(f64, @floatFromInt(world.frame)) }
+                                    |> std/store:stored { world.psel: world.sel, world.fu: world.down }
+                                    |> std/store:stored { fworld.ft0: @as(f64, @floatFromInt(world.frame)), fworld.dt0: if (world.dive == 1) @as(f64, @floatFromInt(world.frame)) else fworld.dt0 }
+                                    |> std/store:stored { world.dive: 0 }
                                     |> std/store:stored { world.sel: world.down }
                     // THE COG — manual bounds (stage chrome isn't in hit).
                     |> if (e.x >= fworld.cx0 and e.x < fworld.cx0 + fworld.cw and e.y >= fworld.cy0 and e.y < fworld.cy0 + fworld.ch)

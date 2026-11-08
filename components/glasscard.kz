@@ -1,0 +1,33 @@
+// @korulang/components/glasscard — a frosted pane over a shared
+// photograph. draw.imagecover fills the caller's backdrop rect
+// (bx,by,bw,bh — pass the SAME rect to every pane and they share one
+// continuous photo), draw.capture freezes it, draw.frost glasses this
+// pane's bounds flat — no border, no shadow; the material's own edge
+// chamfer is the only boundary. One measured label finishes it.
+// `a` is master alpha; `rad` is the pane radius (h/2 reads as a pill).
+//
+//   glasscard(win, f, tex, cx, cy, w, h, bx, by, bw, bh, rad, label, face, a)
+//
+// `tex` is an image.load handle. Ink comes from std/ctx(theme): ir/ig/ib.
+// (cx, cy) centers a w×h pane inside the bx,by,bw,bh backdrop.
+
+~import libs/metal
+
+~pub tor glasscard {
+    win: *libs/metal:Window<opened|active>,
+    f: *libs/metal:Frame<frame>,
+    tex: i64,
+    cx: f64, cy: f64, w: f64, h: f64,
+    bx: f64, by: f64, bw: f64, bh: f64,
+    rad: f64,
+    label: string, face: i64, a: f64,
+    li: f64, lg: f64, lb: f64,
+}
+
+~glasscard = libs/metal:draw.imagecover(f, tex, x: bx, y: by, w: bw, h: bh)
+    // freeze the scene, glass the pane — the material IS the card
+    |> libs/metal:draw.capture(f)
+    |> libs/metal:draw.frost(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, rough: 4.0, edge: 10.0, grain: 0.05, milk: 0.12, r: 0.80, g: 0.87, b: 0.97, a: a * 0.9)
+    // label — measured center, optical middle
+    |> libs/metal:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
+        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)
