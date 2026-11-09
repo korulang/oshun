@@ -1,0 +1,10 @@
+{
+  "name": "oshun-koruos",
+  "version": "0.0.1",
+  "description": "koru-os (bare-metal compositor) consumer probes — solver output as data, no host window",
+  "paths": {
+    "libs": "..",
+    "oshun": "..",
+    "std": "../../koru/koru_std"
+  }
+}
