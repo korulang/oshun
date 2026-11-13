@@ -46,7 +46,10 @@
 ~import libs/host
 
 const std = @import("std");
-const H = @import("root").koru_libs.koru_host;
+// Bare module path, NOT @import("root"): under -Mprogram (the kernel
+// image) root is boot.zig, which has no koru_libs — the emitted module
+// nests it at file scope where this resolves in every build shape.
+const H = koru_libs.koru_host;
 
 // ---- provider + kernel C-ABI ------------------------------------------
 
@@ -234,7 +237,31 @@ pub const Window = struct {
     visible: bool = true,
     overlay: bool = false,
     radius: f32 = 0, // overlay corner radius — base clip when > 0
+    slot: u8 = 0,    // index into win_pool — set by winAlloc
 };
+
+// Window custody is a static pool, not std.heap — page_allocator pulls
+// std.posix.mmap, which does not exist on x86_64-freestanding-none.
+// A desktop runs a handful of windows; 16 slots is generous headroom.
+const MAX_WINDOWS = 16;
+var win_pool: [MAX_WINDOWS]Window = undefined;
+var win_used: [MAX_WINDOWS]bool = .{false} ** MAX_WINDOWS;
+
+fn winAlloc() ?*Window {
+    for (0..MAX_WINDOWS) |i| {
+        if (!win_used[i]) {
+            win_used[i] = true;
+            win_pool[i] = .{};
+            win_pool[i].slot = @intCast(i);
+            return &win_pool[i];
+        }
+    }
+    return null;
+}
+
+fn winFree(w: *Window) void {
+    win_used[w.slot] = false;
+}
 
 pub const Frame = struct {
     win: *Window,
@@ -512,10 +539,13 @@ fn drawTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 ~proc window.open|zig {
     _ = title; // the provider takes a label arg but has no WM to show it
     if (width <= 0 or height <= 0) return .{ .err = "metal: window.open needs positive dims" };
-    const w = std.heap.page_allocator.create(Window) catch @panic("metal: OOM Window");
-    w.* = .{ .w = @intCast(width), .h = @intCast(height), .visible = true, .overlay = false };
+    const w = winAlloc() orelse return .{ .err = "metal: window pool exhausted" };
+    w.w = @intCast(width);
+    w.h = @intCast(height);
+    w.visible = true;
+    w.overlay = false;
     if (!surfEnsure(w)) {
-        std.heap.page_allocator.destroy(w);
+        winFree(w);
         return .{ .err = "metal: surface open refused (pool/pmm/display)" };
     }
     return .{ .win = w };
@@ -527,11 +557,15 @@ fn drawTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 
 ~proc window.overlay|zig {
     if (width <= 0 or height <= 0) return .{ .err = "metal: window.overlay needs positive dims" };
-    const w = std.heap.page_allocator.create(Window) catch @panic("metal: OOM Window");
+    const w = winAlloc() orelse return .{ .err = "metal: window pool exhausted" };
     // Mints hidden — the surface opens lazily on show/frames so an
     // overlay costs zero compositor layers until summoned. Opaque, not
     // translucent: surface pixels carry no alpha to the desktop.
-    w.* = .{ .w = @intCast(width), .h = @intCast(height), .visible = false, .overlay = true, .radius = @floatCast(radius) };
+    w.w = @intCast(width);
+    w.h = @intCast(height);
+    w.visible = false;
+    w.overlay = true;
+    w.radius = @floatCast(radius);
     return .{ .win = w };
 }
 
@@ -652,7 +686,7 @@ fn drawTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
 
 ~proc window.close|zig {
     surfDrop(win);
-    std.heap.page_allocator.destroy(win);
+    winFree(win);
 }
 
 ~pub tor window.clear.color { win: *Window<opened|active>, r: f32, g: f32, b: f32 }
