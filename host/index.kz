@@ -13,3 +13,4 @@
 // honor it.
 
 ~[build == macos]part macos
+~[build == koru-native]part koru-native

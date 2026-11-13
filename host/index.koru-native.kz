@@ -1,0 +1,166 @@
+// oshun/host:koru-native — the freestanding compositor host. Joins only
+// under `~[build == koru-native]` (index.kz gates the part); the AppKit
+// body in index.macos.kz never enters this build — that is the part
+// system's whole job, and this file is its first complex stress test.
+//
+// What transfers from the macOS part is the CONTRACT SHAPE, not the
+// code: an event ring the program drains, host.run as the pump that
+// keeps it fed, quit as the exit verb, and the H.* primitives renderers
+// call. What does not transfer is every line of Cocoa — this part talks
+// to koruos/surface + the kernel's prog_pump seam instead.
+//
+// v0 scope (honest): host.run registers a per-shell-tick pump through
+// extern koru_pump_set; each tick pushes a `frame` HostEvent (input
+// events land when the kernel grows input externs — the ring shape is
+// already the macOS one so consumers don't relearn it). Chrome verbs
+// (tray/menu/dialog/notify/hotkey/mic/paste) are NOT declared — a
+// consumer that calls one gets a loud unknown-tor at compile time,
+// which is the spec's loud axis, not a silent stub.
+
+// ---- event payloads -------------------------------------------------
+// The data structs mirror the macOS part's names so shared consumers
+// can name the types; only the variants the native pump can actually
+// produce are pushed today.
+
+pub const TrayActionData = struct {
+    tray: i64,
+    tag: i64,
+    action: []const u8 = &.{},
+};
+
+pub const MenuActionData = struct {
+    tag: i64,
+    action: []const u8 = &.{},
+};
+
+pub const HotkeyData = struct {
+    key: i64,
+    mods: i64,
+    down: i64,
+};
+
+pub const RemoteData = struct {
+    button: u32,
+    page: u32,
+    down: u8,
+};
+
+// Pointer/key payloads — the native input events the pump will push once
+// kernel input externs exist (cursor.sprite/buttonsHeld, kbd.pollChar).
+pub const PointerData = struct {
+    x: i32,
+    y: i32,
+    buttons: u32,
+};
+
+pub const KeyData = struct {
+    code: u32,
+    down: u8,
+};
+
+pub const HostEvent = union(enum) {
+    frame: void,
+    pointer: PointerData,
+    key: KeyData,
+    quit: void,
+    tray: TrayActionData,
+    menu: MenuActionData,
+    hotkey: HotkeyData,
+    remote_button: RemoteData,
+};
+
+// ---- the ring (same discipline as the macOS part) -------------------
+
+var ev_buf: [64]HostEvent = undefined;
+var ev_actions: [64][64]u8 = undefined;
+var ev_head: usize = 0;
+var ev_tail: usize = 0;
+
+fn pushEvent(e: HostEvent, action_src: []const u8) void {
+    const next = (ev_tail + 1) % ev_buf.len;
+    if (next == ev_head) return;
+    const n = @min(action_src.len, ev_actions[0].len);
+    @memcpy(ev_actions[ev_tail][0..n], action_src[0..n]);
+    var ev = e;
+    switch (ev) {
+        .tray => |*t| t.action = ev_actions[ev_tail][0..n],
+        .menu => |*m| m.action = ev_actions[ev_tail][0..n],
+        .frame, .pointer, .key, .quit, .hotkey, .remote_button => {},
+    }
+    ev_buf[ev_tail] = ev;
+    ev_tail = next;
+}
+
+pub fn popEvent() ?HostEvent {
+    if (ev_head == ev_tail) return null;
+    const e = ev_buf[ev_head];
+    ev_head = (ev_head + 1) % ev_buf.len;
+    return e;
+}
+
+pub var should_quit: bool = false;
+
+// ---- H.* primitives (the surface renderers call) --------------------
+// Same names as the macOS part where the semantics overlap, so a
+// renderer written against the contract compiles against either body.
+
+pub fn ensureApp() void {}
+
+pub fn activateRegular() void {}
+
+pub fn pushRemote(d: RemoteData) void {
+    pushEvent(.{ .remote_button = d }, "");
+}
+
+// drain_paused — on macOS a nested pump owns the drain while it runs.
+// On native the shell loop owns every tick; the flag exists so shared
+// renderer code compiles and behaves (nothing to arbitrate here).
+pub var drain_paused: bool = false;
+
+// serviceRunLoop — macOS pumps NSApp events here. Native: the kernel
+// pump IS the runloop; this is a no-op that keeps the call shape.
+pub fn serviceRunLoop() void {}
+
+// ---- the pump --------------------------------------------------------
+// host.run registers one callback with the kernel through koru_pump_set.
+// Each shell tick it pushes a frame event and counts down; at zero (or
+// should_quit) it disarms itself and pushes quit. A program that wants
+// per-frame WORK registers its own callback instead and calls popEvent —
+// prog_pump holds one slot, so host.run and a custom pump are alternatives,
+// not layers. That is v0's honest shape; multi-listener dispatch is future.
+
+extern fn koru_pump_set(cb: ?*const fn () callconv(.c) void) callconv(.c) void;
+
+var run_left: i64 = 0;
+var run_armed: bool = false;
+
+fn hostPump() callconv(.c) void {
+    if (should_quit) run_left = 0;
+    if (run_left == 0) {
+        run_armed = false;
+        koru_pump_set(null);
+        pushEvent(.{ .quit = {} }, "");
+        return;
+    }
+    if (run_left > 0) run_left -= 1;
+    pushEvent(.{ .frame = {} }, "");
+}
+
+~pub tor host.run { count: ?i32 }
+
+~proc host.run|zig {
+    run_left = count orelse -1;
+    run_armed = true;
+    koru_pump_set(hostPump);
+}
+
+~pub tor quit {}
+
+~proc quit|zig {
+    should_quit = true;
+    if (run_armed) {
+        run_armed = false;
+        koru_pump_set(null);
+    }
+    pushEvent(.{ .quit = {} }, "");
+}
