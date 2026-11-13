@@ -463,7 +463,9 @@ fn drawGlyph(f: *Frame, gx: f64, gy: f64, sc: u32, ch: u8, col: Col) void {
         const bits = koru_glyph8(ch, row);
         var colb: u8 = 0;
         while (colb < 8) : (colb += 1) {
-            if (((bits >> @as(u3, @intCast(7 - colb))) & 1) != 0) {
+            // bit `colb` is the pixel — the kernel renderers (text.zig
+            // glyphAt, cmdview) read LSB-first; bit7-first mirrors the face.
+            if (((bits >> @as(u3, @intCast(colb))) & 1) != 0) {
                 fillPxRect(f, x0 + @as(f64, @floatFromInt(@as(u32, colb) * sc)), y0 + @as(f64, @floatFromInt(@as(u32, row) * sc)), @as(f64, @floatFromInt(sc)), @as(f64, @floatFromInt(sc)), col);
             }
         }
