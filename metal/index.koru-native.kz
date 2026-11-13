@@ -1,0 +1,922 @@
+// oshun/metal:koru-native — the freestanding software rasterizer. Joins
+// only under `~[build == koru-native]` (index.kz gates the part); the
+// 3000-line ObjC/Metal body in index.macos.kz never enters this build —
+// dormant bytes, never parsed, never emitted. That deadstrip is the part
+// system's whole claim and this file is its stress test.
+//
+// What transfers is the CONTRACT: the window/frames/draw/clip/text/input
+// tor surface, the phantom states (*Window<opened|active>, *Frame<frame>),
+// and the event-ring + arm-dispatch shape inside frames. What does not
+// transfer is every line of Cocoa/Metal — this part rasterizes in
+// software into a koruos/surface backing (u32 0x00RRGGBB pixels,
+// src-over alpha, the cmdview.zig convention) and presents damage
+// through the provider's C ABI — the same symbols the koruos/surface
+// lift wraps; this is platform code, so it speaks the ABI directly the
+// way the macOS part speaks CG*/MTL*.
+//
+// The pump model mirrors macOS: frames BLOCKS inside prog.main() —
+// which runs synchronously inside shell dispatch — and drives one
+// desktop tick per iteration through the kernel's exported koru_tick
+// (cursor/comp/win/present keep compositing while it runs). Input comes
+// from koru_kbd_poll/koru_pointer_state; the app owns the kbd queue and
+// pointer while its pump runs. libs/host's host.run is the same shape
+// without a window.
+//
+// v0 scope (honest):
+//   IMPLEMENTED — window.open/overlay/show/hide/pin/close/size/
+//     clear.color/snap, frames (all arms), draw.rect/roundrect/panel,
+//     draw.clip.push/push.round/pop, draw.text, text.index/offset/
+//     ascent/descent, input.* synthesis, release.frame.
+//   UNDECLARED — draw.triangle/bezier/shadow/glass/capture/frost,
+//     draw.image*/imagetint/imagecover, image.load/free/width/height,
+//     font.load, draw.textface, offscreen.*, remote.watch. A consumer
+//     calling one gets a loud unknown-tor at compile time — the spec's
+//     loud axis, never a silent stub.
+//   KNOWN DELTAS — text is the kernel's 8x8 bitmap face (ASCII, no
+//     shaping); `size` maps to an integer pixel scale; window.snap
+//     samples pixels onto the wire instead of writing a BMP (there is
+//     no filesystem); window.pin is vacuous (no app-deactivate concept);
+//     surfaces are opaque — overlay corners clip but cannot alpha-blend
+//     to the desktop.
+//
+// Kernel exports this part calls — provided by koru-os-m1's native
+// image (shell.zig / runtime.zig / text.zig / surf.zig), resolved at
+// link; absent on hosted builds where this part never joins.
+
+~import libs/host
+
+const std = @import("std");
+const H = @import("root").koru_libs.koru_host;
+
+// ---- provider + kernel C-ABI ------------------------------------------
+
+extern fn koruos_surface_open(w: u32, h: u32, title: [*:0]const u8) ?*anyopaque;
+extern fn koruos_surface_present(s: *anyopaque, x: u32, y: u32, w: u32, h: u32) u8;
+extern fn koruos_surface_close(s: *anyopaque) u8;
+extern fn koruos_surface_map(p: ?*anyopaque, out_phys: *u64, out_bytes: *u64) u8;
+const Geom = extern struct { x: u32, y: u32, w: u32, h: u32, sw: u32, sh: u32 };
+extern fn koruos_surface_geom(p: ?*anyopaque, out: *Geom) u8;
+
+extern fn koru_tick() callconv(.c) void;
+extern fn koru_kbd_poll() callconv(.c) i32;
+extern fn koru_pointer_state(x: *i32, y: *i32, on: *u8, buttons: *u32) callconv(.c) void;
+extern fn koru_wire(s: [*]const u8, n: usize) callconv(.c) void;
+extern fn koru_glyph8(ch: u8, row: u8) callconv(.c) u8;
+extern fn ukplat_monotonic_clock() callconv(.c) u64; // ns
+
+fn sleepNs(ns: u64) void {
+    const t0 = ukplat_monotonic_clock();
+    while (ukplat_monotonic_clock() - t0 < ns) {}
+}
+
+fn nowSeconds() f32 {
+    return @floatCast(@as(f64, @floatFromInt(ukplat_monotonic_clock())) / 1.0e9);
+}
+
+// ---- pixel format + blend ----------------------------------------------
+// Surface backings are u32 0x00RRGGBB (surf.zig/cmdview.zig convention).
+// Alpha blends src-over: out = (src*a + dst*(255-a))/255 per channel.
+
+fn packColor(r: f64, g: f64, b: f64) u32 {
+    const rc: u32 = @intFromFloat(@round(@max(0.0, @min(1.0, r)) * 255.0));
+    const gc: u32 = @intFromFloat(@round(@max(0.0, @min(1.0, g)) * 255.0));
+    const bc: u32 = @intFromFloat(@round(@max(0.0, @min(1.0, b)) * 255.0));
+    return (rc << 16) | (gc << 8) | bc;
+}
+
+fn blendInto(dst: *u32, sr: u32, sg: u32, sb: u32, sa: u32) void {
+    const inv = 255 - sa;
+    const d = dst.*;
+    const nr = (sr * sa + ((d >> 16) & 0xFF) * inv) / 255;
+    const ng = (sg * sa + ((d >> 8) & 0xFF) * inv) / 255;
+    const nb = (sb * sa + (d & 0xFF) * inv) / 255;
+    dst.* = (nr << 16) | (ng << 8) | nb;
+}
+
+// ---- event payloads + ring (macOS shapes, verbatim) ---------------------
+
+pub const KeyData = struct {
+    code: u16,
+    chars: []const u8 = &.{},
+};
+
+pub const MouseData = struct {
+    x: f64,
+    y: f64,
+};
+
+pub const ScrollData = struct {
+    x: f64,
+    y: f64,
+    dx: f64,
+    dy: f64,
+};
+
+pub const RemoteData = struct {
+    button: u32,
+    page: u32,
+    down: u8,
+};
+
+const Event = union(enum) {
+    key_down: KeyData,
+    mouse_down: MouseData,
+    mouse_up: MouseData,
+    mouse_move: MouseData,
+    mouse_drag: MouseData,
+    scroll: ScrollData,
+    remote_button: RemoteData,
+};
+
+var ev_buf: [64]Event = undefined;
+var ev_chars: [64][16]u8 = undefined;
+var ev_head: usize = 0;
+var ev_tail: usize = 0;
+
+fn pushKey(kc: u16, chars: []const u8) void {
+    const next = (ev_tail + 1) % ev_buf.len;
+    if (next == ev_head) return;
+    const n = @min(chars.len, ev_chars[0].len);
+    @memcpy(ev_chars[ev_tail][0..n], chars[0..n]);
+    ev_buf[ev_tail] = .{ .key_down = .{ .code = kc, .chars = ev_chars[ev_tail][0..n] } };
+    ev_tail = next;
+}
+
+fn pushEvent(e: Event) void {
+    if (ev_tail != ev_head) {
+        const last = if (ev_tail == 0) ev_buf.len - 1 else ev_tail - 1;
+        switch (e) {
+            .mouse_move => if (ev_buf[last] == .mouse_move) {
+                ev_buf[last] = e;
+                return;
+            },
+            .mouse_drag => if (ev_buf[last] == .mouse_drag) {
+                ev_buf[last] = e;
+                return;
+            },
+            else => {},
+        }
+    }
+    const next = (ev_tail + 1) % ev_buf.len;
+    if (next != ev_head) {
+        ev_buf[ev_tail] = e;
+        ev_tail = next;
+    }
+}
+
+fn popEvent() ?Event {
+    if (ev_head == ev_tail) return null;
+    const e = ev_buf[ev_head];
+    ev_head = (ev_head + 1) % ev_buf.len;
+    return e;
+}
+
+// ---- input polling (the kernel's cursor/kbd -> our ring) -----------------
+
+var in_has_prev: bool = false;
+var in_prev_x: i32 = 0;
+var in_prev_y: i32 = 0;
+var in_prev_btns: u32 = 0;
+
+fn pollInput(win: *Window) void {
+    while (true) {
+        const c = koru_kbd_poll();
+        if (c < 0) break;
+        var ch: [1]u8 = .{@intCast(c)};
+        pushKey(0, ch[0..]); // code 0 — native has no keycode map; chars carry it
+    }
+    var x: i32 = undefined;
+    var y: i32 = undefined;
+    var on: u8 = undefined;
+    var btns: u32 = undefined;
+    koru_pointer_state(&x, &y, &on, &btns);
+    if (!in_has_prev) {
+        in_prev_x = x;
+        in_prev_y = y;
+        in_prev_btns = btns;
+        in_has_prev = true;
+        return;
+    }
+    const lx = x - win.sx;
+    const ly = y - win.sy;
+    const inside = on != 0 and lx >= 0 and ly >= 0 and
+        @as(u32, @intCast(lx)) < win.w and @as(u32, @intCast(ly)) < win.h;
+    const moved = x != in_prev_x or y != in_prev_y;
+    const was_down = (in_prev_btns & 1) != 0;
+    const is_down = (btns & 1) != 0;
+    if (inside) {
+        const md = MouseData{ .x = @as(f64, @floatFromInt(lx)), .y = @as(f64, @floatFromInt(ly)) };
+        if (is_down and !was_down) {
+            pushEvent(.{ .mouse_down = md });
+        } else if (!is_down and was_down) {
+            pushEvent(.{ .mouse_up = md });
+        } else if (moved) {
+            pushEvent(if (is_down) .{ .mouse_drag = md } else .{ .mouse_move = md });
+        }
+    }
+    in_prev_x = x;
+    in_prev_y = y;
+    in_prev_btns = btns;
+}
+
+// ---- window + frame tokens ------------------------------------------------
+// Platform-typed structs — the phantom states ride the tor signatures,
+// identical to the macOS part's by contract.
+
+pub const Window = struct {
+    surf: ?*anyopaque = null, // provider token — null while hidden (overlay)
+    px: [*]u32 = undefined,   // backing — identity-mapped phys via surface_map
+    w: u32 = 0,
+    h: u32 = 0,
+    sx: i32 = 0, // scene origin — geom, refreshed per frames iteration
+    sy: i32 = 0,
+    clear: u32 = 0x001A1A26,  // macOS default 0.1/0.1/0.15 -> 0x00RRGGBB
+    visible: bool = true,
+    overlay: bool = false,
+    radius: f32 = 0, // overlay corner radius — base clip when > 0
+};
+
+pub const Frame = struct {
+    win: *Window,
+    px: [*]u32,
+    w: u32,
+    h: u32,
+    clip: [16][5]f32, // x0,y0,x1,y1,round — same shape as macOS
+    clip_depth: u8 = 0,
+    calls: usize = 0, // draw-call count
+    time: f32 = 0,
+};
+
+pub const Size = struct {
+    w: f64,
+    h: f64,
+};
+
+// ---- surface custody -------------------------------------------------------
+
+fn surfEnsure(win: *Window) bool {
+    if (win.surf != null) return true;
+    if (win.w == 0 or win.h == 0) return false;
+    const p = koruos_surface_open(win.w, win.h, "koru-native".ptr) orelse return false;
+    var phys: u64 = 0;
+    var bytes: u64 = 0;
+    if (koruos_surface_map(p, &phys, &bytes) == 0 or bytes < @as(u64, win.w) * win.h * 4) {
+        _ = koruos_surface_close(p);
+        return false;
+    }
+    var g: Geom = undefined;
+    if (koruos_surface_geom(p, &g) != 0) {
+        win.sx = @intCast(g.x);
+        win.sy = @intCast(g.y);
+    }
+    win.surf = p;
+    win.px = @ptrFromInt(@as(usize, @intCast(phys)));
+    return true;
+}
+
+fn surfDrop(win: *Window) void {
+    if (win.surf) |s| {
+        _ = koruos_surface_close(s);
+        win.surf = null;
+    }
+}
+
+fn refreshGeom(win: *Window) void {
+    const s = win.surf orelse return;
+    var g: Geom = undefined;
+    if (koruos_surface_geom(s, &g) != 0) {
+        win.sx = @intCast(g.x);
+        win.sy = @intCast(g.y);
+    }
+}
+
+fn clearBacking(win: *Window) void {
+    const n: usize = @as(usize, @intCast(win.w)) * @as(usize, @intCast(win.h));
+    var i: usize = 0;
+    while (i < n) : (i += 1) win.px[i] = win.clear;
+}
+
+// present + tick as one module fn — externs can't be named bare inside a
+// spliced (effect-branch) proc body, so the frame commit rides $mod.
+fn frameCommit(win: *Window, s: *anyopaque) void {
+    _ = koruos_surface_present(s, 0, 0, win.w, win.h);
+    koru_tick();
+}
+
+// ---- rasterizer ------------------------------------------------------------
+// Signed distance to a rounded box (negative inside), pixel-center
+// sampled with a 1px coverage ramp — the honest software answer to the
+// Metal SDF the macOS fragment shader evaluates per-pixel.
+
+fn sdRoundBox(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) f32 {
+    const cx = (x0 + x1) * 0.5;
+    const cy = (y0 + y1) * 0.5;
+    const hw = @max(0.0, (x1 - x0) * 0.5 - r);
+    const hh = @max(0.0, (y1 - y0) * 0.5 - r);
+    const qx = @abs(px - cx) - hw;
+    const qy = @abs(py - cy) - hh;
+    const ax = @max(qx, 0.0);
+    const ay = @max(qy, 0.0);
+    return @sqrt(ax * ax + ay * ay) + @min(@max(qx, qy), 0.0) - r;
+}
+
+fn covOf(d: f32) f32 {
+    return @max(0.0, @min(1.0, 0.5 - d));
+}
+
+fn clipDepth(f: *Frame) usize {
+    return @as(usize, @intCast(f.clip_depth));
+}
+
+// Coverage of the live clip stack at a pixel center — every level must
+// contain the point (intersection), each level keeping its own rounding.
+fn clipCov(f: *Frame, sx: f32, sy: f32) f32 {
+    var cc: f32 = 1.0;
+    for (f.clip[0..clipDepth(f)]) |*l| {
+        cc = @min(cc, covOf(sdRoundBox(sx, sy, l[0], l[1], l[2], l[3], l[4])));
+        if (cc <= 0.0) return 0.0;
+    }
+    return cc;
+}
+
+fn pxAt(f: *Frame, x: i32, y: i32) *u32 {
+    return &f.px[@as(usize, @intCast(y)) * @as(usize, @intCast(f.w)) + @as(usize, @intCast(x))];
+}
+
+// One blended pixel — clip coverage times the caller's alpha.
+fn pxBlend(f: *Frame, x: i32, y: i32, sx: f32, sy: f32, sr: u32, sg: u32, sb: u32, sa: u32) void {
+    const cc = clipCov(f, sx, sy);
+    if (cc <= 0.0) return;
+    const a = @min(1.0, cc) * (@as(f32, @floatFromInt(sa)) / 255.0);
+    const ai: u32 = @intFromFloat(@round(a * 255.0));
+    if (ai == 0) return;
+    blendInto(pxAt(f, x, y), sr, sg, sb, ai);
+}
+
+const Col = struct { r: u32, g: u32, b: u32, a: u32 };
+
+fn colOf(r: f64, g: f64, b: f64, a: f64) Col {
+    const c = packColor(r, g, b);
+    const av: u32 = @intFromFloat(@round(@max(0.0, @min(1.0, a)) * 255.0));
+    return .{ .r = (c >> 16) & 0xFF, .g = (c >> 8) & 0xFF, .b = c & 0xFF, .a = av };
+}
+
+// A filled rounded box — the one shape draw.rect/roundrect/panel share.
+// radius 0 degenerates to a sharp rect; coverage is analytic, not
+// point-sampled, so edges carry a 1px ramp.
+fn fillShape(f: *Frame, x: f64, y: f64, w: f64, h: f64, radius: f64, col: Col) void {
+    if (col.a == 0 or w <= 0 or h <= 0) return;
+    const x0: f32 = @floatCast(x);
+    const y0: f32 = @floatCast(y);
+    const x1: f32 = @floatCast(x + w);
+    const y1: f32 = @floatCast(y + h);
+    const rad: f32 = @floatCast(radius);
+    const ix0 = @max(0, @floor(@min(x, x + w)));
+    const iy0 = @max(0, @floor(@min(y, y + h)));
+    const ix1 = @min(@as(f64, @floatFromInt(f.w)), @ceil(@max(x, x + w)));
+    const iy1 = @min(@as(f64, @floatFromInt(f.h)), @ceil(@max(y, y + h)));
+    var py = iy0;
+    while (py < iy1) : (py += 1) {
+        var px = ix0;
+        while (px < ix1) : (px += 1) {
+            const sx = @as(f32, @floatCast(px)) + 0.5;
+            const sy = @as(f32, @floatCast(py)) + 0.5;
+            const sc = covOf(sdRoundBox(sx, sy, x0, y0, x1, y1, rad));
+            if (sc <= 0.0) continue;
+            const a = sc * (@as(f32, @floatFromInt(col.a)) / 255.0);
+            const ai: u32 = @intFromFloat(@round(@min(1.0, a) * 255.0));
+            if (ai == 0) continue;
+            const cc = clipCov(f, sx, sy);
+            if (cc <= 0.0) continue;
+            const fa = @min(1.0, cc) * (@as(f32, @floatFromInt(ai)) / 255.0);
+            const fi: u32 = @intFromFloat(@round(fa * 255.0));
+            if (fi == 0) continue;
+            blendInto(pxAt(f, @intFromFloat(px), @intFromFloat(py)), col.r, col.g, col.b, fi);
+        }
+    }
+    f.calls += 1;
+}
+
+// A crisp filled rect — no shape AA (bitmap-font cells want hard edges);
+// clip coverage still applies.
+fn fillPxRect(f: *Frame, x: f64, y: f64, w: f64, h: f64, col: Col) void {
+    if (col.a == 0) return;
+    const ix0 = @max(0, @floor(@min(x, x + w)));
+    const iy0 = @max(0, @floor(@min(y, y + h)));
+    const ix1 = @min(@as(f64, @floatFromInt(f.w)), @ceil(@max(x, x + w)));
+    const iy1 = @min(@as(f64, @floatFromInt(f.h)), @ceil(@max(y, y + h)));
+    var py = iy0;
+    while (py < iy1) : (py += 1) {
+        var px = ix0;
+        while (px < ix1) : (px += 1) {
+            pxBlend(f, @intFromFloat(px), @intFromFloat(py), @as(f32, @floatCast(px)) + 0.5, @as(f32, @floatCast(py)) + 0.5, col.r, col.g, col.b, col.a);
+        }
+    }
+    f.calls += 1;
+}
+
+// ---- text metrics (the 8x8 bitmap face) -------------------------------------
+// `size` is the line-box height in the contract's points; the native face
+// is an 8px em, so size maps to an integer scale — size 16 -> scale 2.
+// advance = 9*scale (8 glyph + 1 gap), ascent = 8*scale, descent = 2*scale.
+
+fn textScale(size: f64) u32 {
+    return @max(@as(u32, 1), @as(u32, @intFromFloat(@round(size / 8.0))));
+}
+
+fn textAdvance(sc: u32) f64 {
+    return @floatFromInt(9 * sc);
+}
+
+fn drawGlyph(f: *Frame, gx: f64, gy: f64, sc: u32, ch: u8, col: Col) void {
+    const x0 = @floor(gx);
+    const y0 = @floor(gy);
+    var row: u8 = 0;
+    while (row < 8) : (row += 1) {
+        const bits = koru_glyph8(ch, row);
+        var colb: u8 = 0;
+        while (colb < 8) : (colb += 1) {
+            if (((bits >> @as(u3, @intCast(7 - colb))) & 1) != 0) {
+                fillPxRect(f, x0 + @as(f64, @floatFromInt(@as(u32, colb) * sc)), y0 + @as(f64, @floatFromInt(@as(u32, row) * sc)), @as(f64, @floatFromInt(sc)), @as(f64, @floatFromInt(sc)), col);
+            }
+        }
+    }
+}
+
+fn drawTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, b: f64, a: f64, text: []const u8) void {
+    _ = face; // font.load is undeclared natively — face is always the system face
+    const col = colOf(r, g, b, a);
+    if (col.a == 0 or text.len == 0) return;
+    const sc = textScale(size);
+    const adv = textAdvance(sc);
+    var pen = x;
+    for (text) |ch| {
+        if (ch >= 0x20 and ch < 0x7F) {
+            drawGlyph(f, pen, y, sc, ch, col);
+        }
+        pen += adv;
+    }
+    f.calls += 1;
+}
+
+// ---- input synthesis (automation verbs — same as macOS) ---------------------
+
+~pub tor input.key { code: i64 }
+
+~proc input.key|zig {
+    pushKey(@intCast(code), &.{});
+}
+
+~pub tor input.type { chars: string }
+
+~proc input.type|zig {
+    pushKey(0xFFFF, chars);
+}
+
+~pub tor input.mouse { x: f64, y: f64 }
+
+~proc input.mouse|zig {
+    pushEvent(.{ .mouse_down = .{ .x = x, .y = y } });
+}
+
+~pub tor input.move { x: f64, y: f64 }
+
+~proc input.move|zig {
+    pushEvent(.{ .mouse_move = .{ .x = x, .y = y } });
+}
+
+~pub tor input.up { x: f64, y: f64 }
+
+~proc input.up|zig {
+    pushEvent(.{ .mouse_up = .{ .x = x, .y = y } });
+}
+
+~pub tor input.drag { x: f64, y: f64 }
+
+~proc input.drag|zig {
+    pushEvent(.{ .mouse_drag = .{ .x = x, .y = y } });
+}
+
+~pub tor input.scroll { x: f64, y: f64, dx: f64, dy: f64 }
+
+~proc input.scroll|zig {
+    pushEvent(.{ .scroll = .{ .x = x, .y = y, .dx = dx, .dy = dy } });
+}
+
+// ---- window lifecycle --------------------------------------------------------
+
+~pub tor window.open { width: i32, height: i32, title: string }
+| win *Window<opened!>
+| err string
+
+~proc window.open|zig {
+    _ = title; // the provider takes a label arg but has no WM to show it
+    if (width <= 0 or height <= 0) return .{ .err = "metal: window.open needs positive dims" };
+    const w = std.heap.page_allocator.create(Window) catch @panic("metal: OOM Window");
+    w.* = .{ .w = @intCast(width), .h = @intCast(height), .visible = true, .overlay = false };
+    if (!surfEnsure(w)) {
+        std.heap.page_allocator.destroy(w);
+        return .{ .err = "metal: surface open refused (pool/pmm/display)" };
+    }
+    return .{ .win = w };
+}
+
+~pub tor window.overlay { width: i32, height: i32, radius: f64 }
+| win *Window<opened!>
+| err string
+
+~proc window.overlay|zig {
+    if (width <= 0 or height <= 0) return .{ .err = "metal: window.overlay needs positive dims" };
+    const w = std.heap.page_allocator.create(Window) catch @panic("metal: OOM Window");
+    // Mints hidden — the surface opens lazily on show/frames so an
+    // overlay costs zero compositor layers until summoned. Opaque, not
+    // translucent: surface pixels carry no alpha to the desktop.
+    w.* = .{ .w = @intCast(width), .h = @intCast(height), .visible = false, .overlay = true, .radius = @floatCast(radius) };
+    return .{ .win = w };
+}
+
+~pub tor window.show { win: *Window<opened|active> }
+~proc window.show|zig {
+    win.visible = true;
+    if (!surfEnsure(win)) win.visible = false; // frames will report close
+}
+
+// Vacuous on native — there is no app-deactivate to pin against; the
+// semantic is satisfied by construction. Declared so shared consumers
+// compile; the body is honestly empty, not a stub of missing work.
+~pub tor window.pin { win: *Window<opened|active> }
+~proc window.pin|zig {
+    _ = win;
+}
+
+~pub tor window.hide { win: *Window<opened|active> }
+~proc window.hide|zig {
+    win.visible = false;
+    surfDrop(win); // pixels must leave the compositor — reopen on show
+}
+
+~pub tor window.size { win: *Window<opened|active> } -> libs/metal:Size
+
+~proc window.size|zig {
+    return .{ .w = @as(f64, @floatFromInt(win.w)), .h = @as(f64, @floatFromInt(win.h)) };
+}
+
+// window.snap — the pixel oracle. No filesystem exists natively, so the
+// BMP path becomes a wire dump: a header line then a deterministic
+// 8x6 sample grid of surface pixels as RRGGBB hex. A gate can assert
+// exact colors at exact coords — fresher and more falsifiable than a
+// file nobody opens.
+~pub tor window.snap { path: string }
+
+~proc window.snap|zig {
+    const win = live_win orelse {
+        // No pump running — say so on the wire rather than guess a window.
+        const msg = "KSNAP none\n";
+        koru_wire(msg.ptr, msg.len);
+        return;
+    };
+    var buf: [3072]u8 = undefined;
+    var n: usize = 0;
+    const put = struct {
+        fn s(b: []u8, i: *usize, t: []const u8) void {
+            @memcpy(b[i.*..][0..t.len], t);
+            i.* += t.len;
+        }
+        fn c(b: []u8, i: *usize, ch: u8) void {
+            b[i.*] = ch;
+            i.* += 1;
+        }
+        fn d(b: []u8, i: *usize, v: u64) void {
+            var tmp: [20]u8 = undefined;
+            var k: usize = tmp.len;
+            var x = v;
+            if (x == 0) {
+                c(b, i, '0');
+                return;
+            }
+            while (x > 0) {
+                k -= 1;
+                tmp[k] = @intCast('0' + x % 10);
+                x /= 10;
+            }
+            s(b, i, tmp[k..]);
+        }
+        fn h(b: []u8, i: *usize, v: u32) void {
+            var sh: u5 = 28;
+            while (true) {
+                const nib: u8 = @intCast((v >> sh) & 0xF);
+                c(b, i, if (nib < 10) '0' + nib else 'a' + nib - 10);
+                if (sh == 0) break;
+                sh -= 4;
+            }
+        }
+    };
+    s2: {
+        put.s(&buf, &n, "KSNAP ");
+        var li: usize = 0;
+        while (li < path.len and li < 24 and n < buf.len - 40) : (li += 1) {
+            const ch = path[li];
+            put.c(&buf, &n, if (ch >= 0x20 and ch < 0x7F) ch else '_');
+        }
+        put.c(&buf, &n, ' ');
+        put.d(&buf, &n, win.w);
+        put.c(&buf, &n, 'x');
+        put.d(&buf, &n, win.h);
+        put.c(&buf, &n, '\n');
+        const s = win.surf orelse break :s2;
+        _ = s;
+        const gw: u32 = 8;
+        const gh: u32 = 6;
+        var gy: u32 = 0;
+        while (gy < gh) : (gy += 1) {
+            var gx: u32 = 0;
+            while (gx < gw) : (gx += 1) {
+                const sx = @min(win.w - 1, (gx * win.w) / gw);
+                const sy = @min(win.h - 1, (gy * win.h) / gh);
+                const px = win.px[@as(usize, @intCast(sy)) * @as(usize, @intCast(win.w)) + @as(usize, @intCast(sx))];
+                if (n > buf.len - 40) break :s2;
+                put.s(&buf, &n, "SNAP ");
+                put.d(&buf, &n, sx);
+                put.c(&buf, &n, ',');
+                put.d(&buf, &n, sy);
+                put.c(&buf, &n, ' ');
+                put.h(&buf, &n, px);
+                put.c(&buf, &n, '\n');
+            }
+        }
+    }
+    koru_wire(buf[0..n].ptr, n);
+}
+
+~pub tor window.close { win: *Window<!active> }
+
+~proc window.close|zig {
+    surfDrop(win);
+    std.heap.page_allocator.destroy(win);
+}
+
+~pub tor window.clear.color { win: *Window<opened|active>, r: f32, g: f32, b: f32 }
+
+~proc window.clear.color|zig {
+    win.clear = packColor(@floatCast(r), @floatCast(g), @floatCast(b));
+}
+
+// The window snap samples — the contract takes no win param (macOS
+// resolves it through live_win, the frame loop's active window). Same
+// mechanism here: frames sets it for its duration.
+var live_win: ?*Window = null;
+
+// ---- the frame loop ----------------------------------------------------------
+// The `opened -> active` transition, same bracket shape as the macOS part:
+// each iteration ticks the desktop once (koru_tick — the compositor keeps
+// compositing while prog.main() is blocked here), polls kernel input into
+// the ring, drains both rings into the effect arms, then clears the
+// backing, hands `! frame` a live Frame borrow, presents the damage, and
+// paces. `count` bounds the loop; quit()/host.quit or a hidden window
+// exits `| done` (with `! close` fired for the hide path, mirroring
+// macOS's isVisible poll).
+
+~pub tor frames { win: *Window<!opened|!active>, count: ?i32 }
+! frame *Frame<frame!>
+! ?key-down libs/metal:KeyData
+! ?mouse-down libs/metal:MouseData
+! ?mouse-up libs/metal:MouseData
+! ?mouse-move libs/metal:MouseData
+! ?mouse-drag libs/metal:MouseData
+! ?scroll libs/metal:ScrollData
+! ?remote-button libs/metal:RemoteData
+! ?tray-action libs/host:TrayActionData
+! ?menu-action libs/host:MenuActionData
+! ?hotkey libs/host:HotkeyData
+! ?close
+| done *Window<active!>
+
+~proc frames|zig {
+    const __cap = @as(?i32, count) orelse 2147483647;
+    $mod.H.drain_paused = true;
+    defer $mod.H.drain_paused = false;
+    $mod.live_win = win;
+    defer $mod.live_win = null;
+    var i: i32 = 0;
+    while (i < __cap) : (i += 1) {
+        if (win.visible and win.surf == null) _ = $mod.surfEnsure(win);
+        $mod.pollInput(win);
+        while ($mod.popEvent()) |mev| {
+            switch (mev) {
+                .key_down => |k| key_down(k),
+                .mouse_down => |m| mouse_down(m),
+                .mouse_up => |m| mouse_up(m),
+                .mouse_move => |m| mouse_move(m),
+                .mouse_drag => |m| mouse_drag(m),
+                .scroll => |s| scroll(s),
+                .remote_button => |r| remote_button(r),
+            }
+        }
+        while ($mod.H.popEvent()) |hev| {
+            switch (hev) {
+                .tray => |td| tray_action(td),
+                .menu => |md| menu_action(md),
+                .hotkey => |hk| hotkey(hk),
+                .remote_button => |rd| remote_button(.{ .button = rd.button, .page = rd.page, .down = rd.down }),
+            }
+        }
+        if ($mod.H.should_quit) break;
+        if (!win.visible or win.surf == null) {
+            close();
+            break;
+        }
+        const s = win.surf.?;
+        $mod.refreshGeom(win);
+        $mod.clearBacking(win);
+        var __f = $mod.Frame{
+            .win = win,
+            .px = win.px,
+            .w = win.w,
+            .h = win.h,
+            .clip = undefined,
+            .clip_depth = 0,
+            .calls = 0,
+            .time = $mod.nowSeconds(),
+        };
+        if (win.radius > 0) {
+            __f.clip[0] = .{ 0, 0, @as(f32, @floatFromInt(win.w)), @as(f32, @floatFromInt(win.h)), win.radius };
+            __f.clip_depth = 1;
+        }
+        frame(&__f);
+        $mod.frameCommit(win, s);
+        $mod.sleepNs(8_000_000); // ~8ms — the macOS pump's cadence
+    }
+    return .{ .done = win };
+}
+
+// No-op consumer of the per-frame borrow — auto-inserted release, mirror
+// of the macOS part's release.frame.
+~pub tor release.frame { f: *Frame<!frame> }
+~proc release.frame|zig { _ = &f; }
+
+// ---- drawing -------------------------------------------------------------------
+// Every draw call borrows the frame handle, so it can only appear inside
+// a `! frame` body. All rasterization is immediate-mode into the surface
+// backing — the compositor picks the pixels up on present.
+
+~pub tor draw.rect { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.rect|zig {
+    fillShape(f, x, y, w, h, 0, colOf(r, g, b, a));
+}
+
+~pub tor draw.roundrect { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.roundrect|zig {
+    fillShape(f, x, y, w, h, radius, colOf(r, g, b, a));
+}
+
+~pub tor draw.panel { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, r: f64, g: f64, b: f64, a: f64, bw: f64, br: f64, bg: f64, bb: f64, ba: f64 }
+
+~proc draw.panel|zig {
+    fillShape(f, x, y, w, h, radius, colOf(r, g, b, a));
+    const bc = colOf(br, bg, bb, ba);
+    if (bc.a == 0 or bw <= 0) return;
+    // Border ring: coverage of the outer shape minus the shape inset by
+    // the border width — the same SDF math, one ring deep.
+    const ix = @min(bw, @min(w, h) * 0.5);
+    const inner_r = @max(0.0, radius - ix);
+    const x0: f32 = @floatCast(x + ix);
+    const y0: f32 = @floatCast(y + ix);
+    const x1: f32 = @floatCast(x + w - ix);
+    const y1: f32 = @floatCast(y + h - ix);
+    const orad: f32 = @floatCast(radius);
+    const irad: f32 = @floatCast(inner_r);
+    const bx0 = @max(0, @floor(x));
+    const by0 = @max(0, @floor(y));
+    const bx1 = @min(@as(f64, @floatFromInt(f.w)), @ceil(x + w));
+    const by1 = @min(@as(f64, @floatFromInt(f.h)), @ceil(y + h));
+    var py = by0;
+    while (py < by1) : (py += 1) {
+        var px = bx0;
+        while (px < bx1) : (px += 1) {
+            const sx = @as(f32, @floatCast(px)) + 0.5;
+            const sy = @as(f32, @floatCast(py)) + 0.5;
+            const xo: f32 = @floatCast(x);
+            const yo: f32 = @floatCast(y);
+            const xw: f32 = @floatCast(x + w);
+            const yh: f32 = @floatCast(y + h);
+            const ring = covOf(sdRoundBox(sx, sy, xo, yo, xw, yh, orad)) -
+                covOf(sdRoundBox(sx, sy, x0, y0, x1, y1, irad));
+            if (ring <= 0.0) continue;
+            const ra = @min(1.0, ring) * (@as(f32, @floatFromInt(bc.a)) / 255.0);
+            const ai: u32 = @intFromFloat(@round(ra * 255.0));
+            if (ai == 0) continue;
+            const cc = clipCov(f, sx, sy);
+            if (cc <= 0.0) continue;
+            const fi: u32 = @intFromFloat(@round(@min(1.0, cc) * (@as(f32, @floatFromInt(ai)) / 255.0) * 255.0));
+            if (fi == 0) continue;
+            blendInto(pxAt(f, @intFromFloat(px), @intFromFloat(py)), bc.r, bc.g, bc.b, fi);
+        }
+    }
+    f.calls += 1;
+}
+
+// ---- clip stack ----------------------------------------------------------------
+
+~pub tor draw.clip.push { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64 }
+
+~proc draw.clip.push|zig {
+    if (clipDepth(f) >= f.clip.len) return;
+    var x0: f32 = @floatCast(x);
+    var y0: f32 = @floatCast(y);
+    var x1: f32 = x0 + @as(f32, @floatCast(w));
+    var y1: f32 = y0 + @as(f32, @floatCast(h));
+    if (f.clip_depth > 0) {
+        const parent = f.clip[f.clip_depth - 1];
+        x0 = @max(x0, parent[0]);
+        y0 = @max(y0, parent[1]);
+        x1 = @min(x1, parent[2]);
+        y1 = @min(y1, parent[3]);
+    }
+    f.clip[f.clip_depth] = .{ x0, y0, x1, y1, 0.0 };
+    f.clip_depth += 1;
+}
+
+~pub tor draw.clip.push.round { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64 }
+
+~proc draw.clip.push.round|zig {
+    if (clipDepth(f) >= f.clip.len) return;
+    var x0: f32 = @floatCast(x);
+    var y0: f32 = @floatCast(y);
+    var x1: f32 = x0 + @as(f32, @floatCast(w));
+    var y1: f32 = y0 + @as(f32, @floatCast(h));
+    if (f.clip_depth > 0) {
+        const parent = f.clip[f.clip_depth - 1];
+        x0 = @max(x0, parent[0]);
+        y0 = @max(y0, parent[1]);
+        x1 = @min(x1, parent[2]);
+        y1 = @min(y1, parent[3]);
+    }
+    f.clip[f.clip_depth] = .{ x0, y0, x1, y1, @floatCast(radius) };
+    f.clip_depth += 1;
+}
+
+~pub tor draw.clip.pop { f: *Frame<frame> }
+
+~proc draw.clip.pop|zig {
+    if (f.clip_depth > 0) f.clip_depth -= 1;
+}
+
+// ---- text ------------------------------------------------------------------------
+
+~pub tor draw.text { f: *Frame<frame>, x: f64, y: f64, size: f64, r: f64, g: f64, b: f64, a: f64, text: string<*> }
+
+~proc draw.text|zig {
+    drawTextRun(f, x, y, size, 0, r, g, b, a, text);
+}
+
+// ---- text metrics -----------------------------------------------------------------
+// Same face draw.text rasterizes with, so the metrics can't drift from
+// the renderer — the contract's whole point for these verbs.
+
+~pub tor text.index { win: *Window<opened|active>, text: string, size: f64, face: i64, x: f64 } -> i64
+
+~proc text.index|zig {
+    _ = win;
+    _ = face;
+    const sc = textScale(size);
+    const adv = textAdvance(sc);
+    const click = x;
+    var pen = 0.0;
+    var idx: i64 = 0;
+    for (text) |ch| {
+        if (click < pen + adv * 0.5) return idx;
+        pen += adv;
+        idx += 1;
+        _ = ch;
+    }
+    return @intCast(text.len);
+}
+
+~pub tor text.offset { win: *Window<opened|active>, text: string, size: f64, face: i64, index: i64 } -> f64
+
+~proc text.offset|zig {
+    _ = win;
+    _ = face;
+    const sc = textScale(size);
+    const adv = textAdvance(sc);
+    const idx: usize = @intCast(@max(0, @min(index, @as(i64, @intCast(text.len)))));
+    return @as(f64, @floatFromInt(idx)) * adv;
+}
+
+~pub tor text.ascent { win: *Window<opened|active>, size: f64, face: i64 } -> f64
+
+~proc text.ascent|zig {
+    _ = win;
+    _ = face;
+    return @as(f64, @floatFromInt(8 * textScale(size)));
+}
+
+~pub tor text.descent { win: *Window<opened|active>, size: f64, face: i64 } -> f64
+
+~proc text.descent|zig {
+    _ = win;
+    _ = face;
+    return @as(f64, @floatFromInt(2 * textScale(size)));
+}
