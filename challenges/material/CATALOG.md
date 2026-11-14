@@ -1,8 +1,8 @@
 # MATERIAL_CHALLENGE catalog
 
 Finished surface materials from `CHALLENGE.md`. Each entry is a new
-instanced kind in `metal/index.kz`'s shader, a `draw.<name>` verb, and a
-runnable `metal/tests/mat_*.k` demo.
+instanced kind in `canvas/index.kz`'s shader, a `draw.<name>` verb, and a
+runnable `canvas/tests/mat_*.k` demo.
 
 The catalog is the long-running artifact; each replay is one slice through it.
 

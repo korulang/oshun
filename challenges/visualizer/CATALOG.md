@@ -2,7 +2,7 @@
 
 Finished kind-dispatched resource renderers from `CHALLENGE.md`. Each
 entry is a named component in `components/` + a dispatch arm + a runnable
-`metal/tests/viz_*.k` demo.
+`canvas/tests/viz_*.k` demo.
 
 The catalog is the long-running artifact; each replay is one slice through it.
 

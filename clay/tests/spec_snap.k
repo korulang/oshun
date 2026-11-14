@@ -4,7 +4,7 @@
 // solves, Metal draws — grid tracks solve in the walk, not in clay, and
 // `auto` tracks hug the member cells' measured size (the walk's own
 // deepest→root measure pass; a cell carrying children hugs its subtree).
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import oshun
@@ -79,9 +79,9 @@ oshun:component(seed, spec) {
 }
 
 libs/clay:init(width: 640, height: 400)
-| cl h |> libs/metal:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 9999)
+| cl h |> libs/canvas:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 9999)
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             |> if (world.frame == 1)
@@ -110,9 +110,9 @@ libs/clay:init(width: 640, height: 400)
                                 ! query p when p.id == s.pid
                                     |> std/store:stored { p.cc: p.cc + 1, p.cw: if (p.dir == "ttb") (if (s.mw > p.cw) s.mw else p.cw) else p.cw + s.mw + @as(f64, @floatFromInt(p.gap)), p.ch: if (p.dir == "ttb") p.ch + s.mh + @as(f64, @floatFromInt(p.gap)) else (if (s.mh > p.ch) s.mh else p.ch) }
             |> if (world.frame == 30)
-                | then |> libs/metal:window.snap(path: "/tmp/omni_spec.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/omni_spec.bmp")
             |> if (world.frame == 45)
-                | then |> libs/metal:quit()
+                | then |> libs/canvas:quit()
             |> libs/clay:layout(cl: h)
                 ! tree t
                     |> std/store:clear(gtrk)
@@ -169,10 +169,10 @@ libs/clay:init(width: 640, height: 400)
                                     |> libs/ui:panel(t, s.dock, s.ws, s.w, s.hs, s.h, s.dir, s.gap, s.pad, s.ax, s.ay, s.r, s.g, s.b, s.a, s.fl, s.fx, s.fy)
                 | solved cls |> libs/clay:each(cl: cls)
                     ! cmd rc |> if (rc.kind == 1)
-                        | then |> libs/metal:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
+                        | then |> libs/canvas:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
                     | drained |> std/store:stored { world.drew: 1 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
-        ! close |> libs/metal:quit()
-        | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
+        ! key-down k when k.code == 53 |> libs/canvas:quit()
+        ! close |> libs/canvas:quit()
+        | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

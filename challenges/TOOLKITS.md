@@ -133,7 +133,7 @@ agent-model portion *rewritten* in Koru where it belongs.
 ## Already built — where the custody plane is ahead
 
 The gap list is shorter than a raw vocabulary diff suggests. From
-`metal/index.kz` + `components/index.kz` + `commander.k`:
+`canvas/index.kz` + `components/index.kz` + `commander.k`:
 
 - **Materials exist**: `draw.silk` (champagne/pearlescent — the founding
   shader), `draw.glass` (backdrop texture + bezel/refract/rim/aberration

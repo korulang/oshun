@@ -39,7 +39,7 @@
 // Pointer bookkeeping: hover always repaints; down marks the press
 // target; up fires the click iff it lands on down's ud.
 //
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import std/store
@@ -60,41 +60,41 @@ std/store:new(wins) { w: 640.0[f64], h: 480.0[f64] }
 std/store:new(hit, capacity: 96) { seq: i64, cl: i64, x: f64, y: f64, w: f64, h: f64 }
 
 libs/clay:init(width: 640, height: 480)
-| cl h |> libs/metal:window.open(width: 640, height: 480, title: "omni gallery — controls")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 16)
+| cl h |> libs/canvas:window.open(width: 640, height: 480, title: "omni gallery — controls")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 16)
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1 }
                     |> std/store:clear(hit)
-                    |> libs/metal:window.size(win: w): wh
+                    |> libs/canvas:window.size(win: w): wh
                     |> std/store:stored { wins.w: wh.w, wins.h: wh.h }
                     |> libs/clay:dims(cl: h, width: wh.w, height: wh.h)
                     |> if (world.frame == 3)
-                        | then |> libs/metal:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 200.0)
+                        | then |> libs/canvas:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 200.0)
                     |> if (world.frame == 4)
-                        | then |> libs/metal:input.mouse(x: 410.0, y: 128.0)
+                        | then |> libs/canvas:input.mouse(x: 410.0, y: 128.0)
                     |> if (world.frame == 5)
-                        | then |> libs/metal:input.up(x: 410.0, y: 128.0)
+                        | then |> libs/canvas:input.up(x: 410.0, y: 128.0)
                     |> if (world.frame == 6)
-                        | then |> libs/metal:input.mouse(x: 400.0, y: 208.0)
+                        | then |> libs/canvas:input.mouse(x: 400.0, y: 208.0)
                     |> if (world.frame == 7)
-                        | then |> libs/metal:input.up(x: 400.0, y: 208.0)
+                        | then |> libs/canvas:input.up(x: 400.0, y: 208.0)
                     |> if (world.frame == 8)
-                        | then |> libs/metal:input.mouse(x: 560.0, y: 80.0)
+                        | then |> libs/canvas:input.mouse(x: 560.0, y: 80.0)
                     |> if (world.frame == 9)
-                        | then |> libs/metal:input.up(x: 560.0, y: 80.0)
+                        | then |> libs/canvas:input.up(x: 560.0, y: 80.0)
                     |> if (world.frame == 10)
-                        | then |> libs/metal:input.mouse(x: 500.0, y: 272.0)
+                        | then |> libs/canvas:input.mouse(x: 500.0, y: 272.0)
                     |> if (world.frame == 11)
-                        | then |> libs/metal:input.drag(x: 380.0, y: 272.0)
+                        | then |> libs/canvas:input.drag(x: 380.0, y: 272.0)
                     |> if (world.frame == 12)
-                        | then |> libs/metal:input.up(x: 380.0, y: 272.0)
+                        | then |> libs/canvas:input.up(x: 380.0, y: 272.0)
                     |> if (world.frame == 13)
-                        | then |> libs/metal:input.mouse(x: 150.0, y: 48.0)
+                        | then |> libs/canvas:input.mouse(x: 150.0, y: 48.0)
                     |> if (world.frame == 14)
-                        | then |> libs/metal:input.up(x: 150.0, y: 48.0)
+                        | then |> libs/canvas:input.up(x: 150.0, y: 48.0)
                     |> if (world.frame == 15)
-                        | then |> libs/metal:window.snap(path: "/tmp/gallery_snap.bmp")
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_snap.bmp")
                     // The virtual window: which of the 60 rows intersect the
                     // clip box at the current scroll. Reads LAST frame's box —
                     // the drain writes ly0/ly1 before any scroll arm fires.
@@ -151,38 +151,38 @@ libs/clay:init(width: 640, height: 480)
                         | solved cls |> libs/clay:each(cl: cls)
                             ! cmd rc |> if (rc.kind == 1)
                                 | then |> std/store:insert(hit) { seq: rc.ud, cl: world.ic, rc.x, rc.y, rc.w, rc.h }
-                                    |> libs/metal:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
+                                    |> libs/canvas:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
                                     |> if (rc.ud == 102)
                                         | then |> std/store:stored { fworld.sx: rc.x, fworld.sw: rc.w }
-                                            |> libs/metal:draw.rect(f, x: @round(rc.x + fworld.slider * (rc.w - 14.0)), y: @round(rc.y - 4.0), w: 14.0, h: 18.0, r: 120.0, g: 170.0, b: 240.0, a: 255.0)
+                                            |> libs/canvas:draw.rect(f, x: @round(rc.x + fworld.slider * (rc.w - 14.0)), y: @round(rc.y - 4.0), w: 14.0, h: 18.0, r: 120.0, g: 170.0, b: 240.0, a: 255.0)
                                     // Row labels draw HERE, not as clay text — clay borrows the
                                     // string pointer through the drain, so a per-frame String
                                     // must live exactly as long as draw.text needs it: this arm.
                                     |> if (rc.ud >= 1 and rc.ud <= 60)
                                         | then |> std/string:from-int(n: rc.ud - 1)
-                                            | ok ns |> libs/metal:text.ascent(win: w, size: 13.0, face: 0): rasc
-                                                |> libs/metal:text.descent(win: w, size: 13.0, face: 0): rdesc
-                                                |> libs/metal:draw.text(f, x: @round(rc.x + 10.0), y: @round(rc.y + (rc.h - rasc - rdesc) / 2.0), size: 13.0, r: 200.0, g: 205.0, b: 220.0, a: 255.0, text: ns.data)
+                                            | ok ns |> libs/canvas:text.ascent(win: w, size: 13.0, face: 0): rasc
+                                                |> libs/canvas:text.descent(win: w, size: 13.0, face: 0): rdesc
+                                                |> libs/canvas:draw.text(f, x: @round(rc.x + 10.0), y: @round(rc.y + (rc.h - rasc - rdesc) / 2.0), size: 13.0, r: 200.0, g: 205.0, b: 220.0, a: 255.0, text: ns.data)
                                                 |> std/string:free(s: ns)
                                             | err e0 |> std/io:print.ln(e0)
                             ! cmd rc |> if (rc.kind == 3)
                                 | then |> std/store:insert(hit) { seq: rc.ud, cl: world.ic, rc.x, rc.y, rc.w, rc.h }
-                                    |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
+                                    |> libs/canvas:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
                                     |> if (rc.ud == 300)
                                         | then |> libs/clay:measure.text(tx: "clicks: ", fs: 13.0, ls: 0.0): cd
                                             |> std/string:from-int(n: world.clicks)
-                                                | ok cn |> libs/metal:draw.text(f, x: @round(rc.x + cd.w), y: @round(rc.y), size: 13.0, r: 170.0, g: 176.0, b: 196.0, a: 255.0, text: cn.data)
+                                                | ok cn |> libs/canvas:draw.text(f, x: @round(rc.x + cd.w), y: @round(rc.y), size: 13.0, r: 170.0, g: 176.0, b: 196.0, a: 255.0, text: cn.data)
                                                     |> std/string:free(s: cn)
                                                 | err e1 |> std/io:print.ln(e1)
                             ! cmd rc |> if (rc.kind == 5)
                                 | then |> std/store:stored { world.ic: 1 }
                                     |> std/store:stored { fworld.lx0: rc.x, fworld.ly0: rc.y, fworld.lx1: rc.x + rc.w, fworld.ly1: rc.y + rc.h }
-                                    |> libs/metal:draw.clip.push(f, rc.x, rc.y, rc.w, rc.h)
+                                    |> libs/canvas:draw.clip.push(f, rc.x, rc.y, rc.w, rc.h)
                             ! cmd rc |> if (rc.kind == 6)
-                                | then |> libs/metal:draw.clip.pop(f)
+                                | then |> libs/canvas:draw.clip.pop(f)
                                     |> std/store:stored { world.ic: 0 }
                             | drained |> std/store:stored { world.frame: world.frame }
-                ! key-down k when k.code == 53 |> libs/metal:quit()
+                ! key-down k when k.code == 53 |> libs/canvas:quit()
                 ! mouse-move e
                     |> std/store:stored { world.hover: -1 }
                     |> std/store:query(hit)
@@ -213,7 +213,7 @@ libs/clay:init(width: 640, height: 480)
                 ! scroll e
                     |> if (e.x >= fworld.lx0 and e.x < fworld.lx1 and e.y >= fworld.ly0 and e.y < fworld.ly1)
                         | then |> std/store:stored { fworld.scroll: if (fworld.scroll - e.dy < 0.0) 0.0 else if (fworld.scroll - e.dy > 2170.0 - (fworld.ly1 - fworld.ly0)) 2170.0 - (fworld.ly1 - fworld.ly0) else fworld.scroll - e.dy }
-                ! close |> libs/metal:quit()
-                | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("clicks: {{ world.clicks:d }} tog: {{ world.tog:d }} tab: {{ world.tab:d }} sel: {{ world.sel:d }} scroll: {{ fworld.scroll:f }} slider: {{ fworld.slider:f }}") |> std/io:print.ln("gallery: closed (snapped)")
+                ! close |> libs/canvas:quit()
+                | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("clicks: {{ world.clicks:d }} tog: {{ world.tog:d }} tab: {{ world.tab:d }} sel: {{ world.sel:d }} scroll: {{ fworld.scroll:f }} slider: {{ fworld.slider:f }}") |> std/io:print.ln("gallery: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e3 |> std/io:print.ln("clay init failed: {{ e3:s }}")

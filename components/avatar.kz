@@ -9,11 +9,11 @@
 // Ring/ink come from std/ctx(theme): rr/rg/rb rim, ir/ig/ib ink.
 // (cx, cy) centers the d×d circle; name draws below it.
 
-~import libs/metal
+~import libs/canvas
 
 ~pub tor avatar {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     tex: i64,
     cx: f64, cy: f64, d: f64,
     name: string, face: i64, a: f64,
@@ -21,11 +21,11 @@
     ir: f64, ig: f64, ib: f64,
 }
 
-~avatar = libs/metal:draw.clip.push.round(f, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d, radius: d * 0.5)
-    |> libs/metal:draw.imagecover(f, tex, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d)
-    |> libs/metal:draw.clip.pop(f)
+~avatar = libs/canvas:draw.clip.push.round(f, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d, radius: d * 0.5)
+    |> libs/canvas:draw.imagecover(f, tex, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d)
+    |> libs/canvas:draw.clip.pop(f)
     // hairline ring — the medallion edge
-    |> libs/metal:draw.panel(f, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d, radius: d * 0.5, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 2.5, br: rr, bg: rg, bb: rb, ba: a * 0.85)
+    |> libs/canvas:draw.panel(f, x: cx - d * 0.5, y: cy - d * 0.5, w: d, h: d, radius: d * 0.5, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 2.5, br: rr, bg: rg, bb: rb, ba: a * 0.85)
     // name — measured center beneath the circle
-    |> libs/metal:text.offset(win, text: name, size: 15.0, face, index: @as(i64, @intCast(name.len))) : tw
-        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy + d * 0.5 + 16.0, size: 15.0, font: face, r: ir, g: ig, b: ib, a: a * 0.9, text: name)
+    |> libs/canvas:text.offset(win, text: name, size: 15.0, face, index: @as(i64, @intCast(name.len))) : tw
+        |> libs/canvas:draw.textface(f, x: cx - tw / 2.0, y: cy + d * 0.5 + 16.0, size: 15.0, font: face, r: ir, g: ig, b: ib, a: a * 0.9, text: name)

@@ -37,7 +37,7 @@ each drawable's transaction wait bounded to the current step's commit.
 - Controls: **Tab** cycles selection, **click** selects, **Esc** quits.
 - The window is a `KoruMetalView` (NSView subclass) hosting a `CAMetalLayer`,
   driven by a consumer-side `frames` loop on the main thread.
-- Relevant code: `metal/index.kz` — `syncSurfaceSize`, `drawLiveFrame`,
+- Relevant code: `canvas/index.kz` — `syncSurfaceSize`, `drawLiveFrame`,
   `liveDraw`, `impSetFrameSize`, `impWindowResized`, `impLiveStart`, `impLiveEnd`
   (~lines 330–445 at time of writing); `frames|zig` event pump (~line 695+).
 

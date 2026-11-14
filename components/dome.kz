@@ -15,12 +15,12 @@
 // call under `std/ctx(theme)` and the store's same-named fields fill them.
 // (cx, cy) centers a w×h card.
 
-~import libs/metal
+~import libs/canvas
 ~import libs/math
 
 ~pub tor dome {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     tex: i64,
     cx: f64, cy: f64, w: f64, h: f64,
     label: string, face: i64, t: f64, a: f64,
@@ -32,21 +32,21 @@
 
 ~dome = libs/math:sin(x: t * 0.8) : ph
     // the photograph — bleeds past the card so frost edges never hit its border
-    |> libs/metal:draw.image(f, tex, x: cx - w * 0.5 - 14.0, y: cy - h * 0.5 - 14.0, w: w + 28.0, h: h + 28.0)
+    |> libs/canvas:draw.image(f, tex, x: cx - w * 0.5 - 14.0, y: cy - h * 0.5 - 14.0, w: w + 28.0, h: h + 28.0)
     // extrusion — dark down-right, light up-left, same-hue family, on the photo
-    |> libs/metal:draw.shadow(f, x: cx - w * 0.5 + 7.0, y: cy - h * 0.5 + 9.0, w, h, radius: 22.0, blur: 16.0, r: 0.50, g: 0.56, b: 0.66, a: a * 0.38)
-    |> libs/metal:draw.shadow(f, x: cx - w * 0.5 - 7.0, y: cy - h * 0.5 - 9.0, w, h, radius: 22.0, blur: 16.0, r: 0.99, g: 1.0, b: 1.0, a: a * 0.60)
+    |> libs/canvas:draw.shadow(f, x: cx - w * 0.5 + 7.0, y: cy - h * 0.5 + 9.0, w, h, radius: 22.0, blur: 16.0, r: 0.50, g: 0.56, b: 0.66, a: a * 0.38)
+    |> libs/canvas:draw.shadow(f, x: cx - w * 0.5 - 7.0, y: cy - h * 0.5 - 9.0, w, h, radius: 22.0, blur: 16.0, r: 0.99, g: 1.0, b: 1.0, a: a * 0.60)
     // filigree — behind the glass, breathing on t
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.5 + 34.0, y0: cy - h * 0.5 + 46.0, x1: cx + ph * 30.0, y1: cy - h * 0.5 + 92.0, x2: cx + w * 0.5 - 34.0, y2: cy - h * 0.5 + 46.0, w: 2.4, r: rr, g: rg, b: rb, a: a * 0.65)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.5 + 34.0, y0: cy - h * 0.5 + 46.0, x1: cx + ph * 30.0, y1: cy - h * 0.5 + 92.0, x2: cx + w * 0.5 - 34.0, y2: cy - h * 0.5 + 46.0, w: 2.4, r: rr, g: rg, b: rb, a: a * 0.65)
     // freeze photo+shadows+filigree, then glass a pane into it
-    |> libs/metal:draw.capture(f)
-    |> libs/metal:draw.frost(f, x: cx - w * 0.5 + 14.0, y: cy - h * 0.5 + 14.0, w: w - 28.0, h: h - 30.0, radius: 18.0, rough: 4.0, edge: 10.0, grain: 0.05, milk: 0.12, r: 0.80, g: 0.87, b: 0.97, a: a * 0.85)
+    |> libs/canvas:draw.capture(f)
+    |> libs/canvas:draw.frost(f, x: cx - w * 0.5 + 14.0, y: cy - h * 0.5 + 14.0, w: w - 28.0, h: h - 30.0, radius: 18.0, rough: 4.0, edge: 10.0, grain: 0.05, milk: 0.12, r: 0.80, g: 0.87, b: 0.97, a: a * 0.85)
     // the rim — boundary only; the photo shows through the pane
-    |> libs/metal:draw.panel(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: 22.0, r: pr, g: pg, b: pb, a: a * 0.06, bw: 1.5, br: rr, bg: rg, bb: rb, ba: a * 0.55)
+    |> libs/canvas:draw.panel(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: 22.0, r: pr, g: pg, b: pb, a: a * 0.06, bw: 1.5, br: rr, bg: rg, bb: rb, ba: a * 0.55)
     // the key — micro twin-shadows on the glass, the pressable tell
-    |> libs/metal:draw.shadow(f, x: cx - w * 0.5 + 32.0, y: cy + h * 0.5 - 47.0, w: w * 0.32, h: 22.0, radius: 11.0, blur: 7.0, r: 0.50, g: 0.56, b: 0.66, a: a * 0.30)
-    |> libs/metal:draw.shadow(f, x: cx - w * 0.5 + 28.0, y: cy + h * 0.5 - 53.0, w: w * 0.32, h: 22.0, radius: 11.0, blur: 7.0, r: 0.99, g: 1.0, b: 1.0, a: a * 0.50)
-    |> libs/metal:draw.roundrect(f, x: cx - w * 0.5 + 30.0, y: cy + h * 0.5 - 50.0, w: w * 0.32, h: 22.0, radius: 11.0, r: kr, g: kg, b: kb, a: a * 0.92)
+    |> libs/canvas:draw.shadow(f, x: cx - w * 0.5 + 32.0, y: cy + h * 0.5 - 47.0, w: w * 0.32, h: 22.0, radius: 11.0, blur: 7.0, r: 0.50, g: 0.56, b: 0.66, a: a * 0.30)
+    |> libs/canvas:draw.shadow(f, x: cx - w * 0.5 + 28.0, y: cy + h * 0.5 - 53.0, w: w * 0.32, h: 22.0, radius: 11.0, blur: 7.0, r: 0.99, g: 1.0, b: 1.0, a: a * 0.50)
+    |> libs/canvas:draw.roundrect(f, x: cx - w * 0.5 + 30.0, y: cy + h * 0.5 - 50.0, w: w * 0.32, h: 22.0, radius: 11.0, r: kr, g: kg, b: kb, a: a * 0.92)
     // label — measured center on the card's lower band
-    |> libs/metal:text.offset(win, text: label, size: 12.5, face, index: @as(i64, @intCast(label.len))) : tw
-        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy + h * 0.5 - 22.0, size: 12.5, font: face, r: ir, g: ig, b: ib, a: a * 0.9, text: label)
+    |> libs/canvas:text.offset(win, text: label, size: 12.5, face, index: @as(i64, @intCast(label.len))) : tw
+        |> libs/canvas:draw.textface(f, x: cx - tw / 2.0, y: cy + h * 0.5 - 22.0, size: 12.5, font: face, r: ir, g: ig, b: ib, a: a * 0.9, text: label)

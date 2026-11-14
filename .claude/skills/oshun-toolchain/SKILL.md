@@ -8,7 +8,7 @@ description: Orientation map for the oshun repo — what it is, how it builds/te
 **Oshun is OMNI's host surface** — the markup language, solver, renderers,
 backends, host verbs, and component library a Koru desktop app consumes.
 Today it holds the markup transform (`index.kz` → spec-row seeds); the
-UI subtree (metal/clay/ui/solver) is inbound from koru-libs.
+UI subtree (canvas/clay/ui/solver) is inbound from koru-libs.
 
 ## Build / test
 
@@ -40,10 +40,10 @@ UI subtree (metal/clay/ui/solver) is inbound from koru-libs.
 ## What bites
 
 - **commander.k exceeds the default compile-memory budget** — compiling
-  `metal/tests/commander.k` (the OMNI bridge app) needs
+  `canvas/tests/commander.k` (the OMNI bridge app) needs
   `KORU_COMPILE_MEM_MB=8192`; the 4096MB default dies mid-pipeline
   (verified against HEAD, first hit by the visualizer-02 replay).
-  `metal/tests/gallery.k` is bigger still — it refused at 8192 and
+  `canvas/tests/gallery.k` is bigger still — it refused at 8192 and
   compiled clean at `KORU_COMPILE_MEM_MB=16384` (2026-11-07, with the
   flow/bezier additions; whether it already needed >8GB before is
   unmeasured).

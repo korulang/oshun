@@ -20,7 +20,7 @@
 // children (rows at deeper d with pid=cell.id) hugs its subtree, and a
 // row carrying `tx` is rendered content — `clay:measure.text` bakes its
 // w/h from the OS font metric (fs = point size) before the fold.
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import std/store
@@ -56,9 +56,9 @@ std/store:new(gs) { cf: 0.0[f64], cs: 0.0[f64], cn: 0.0[f64], rf: 0.0[f64], rs: 
 std/store:new(gtrk, capacity: 16) { pid: i64, axis: i64, i: i64, off: f64, size: f64 }
 
 libs/clay:init(width: 640, height: 400)
-| cl h |> libs/metal:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 9999)
+| cl h |> libs/canvas:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 9999)
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             |> if (world.frame == 1)
@@ -166,10 +166,10 @@ libs/clay:init(width: 640, height: 400)
                                     |> libs/ui:panel(t, s.dock, s.ws, s.w, s.hs, s.h, s.dir, s.gap, s.pad, s.ax, s.ay, s.r, s.g, s.b, s.a, s.fl, s.fx, s.fy)
                 | solved cls |> libs/clay:each(cl: cls)
                     ! cmd rc |> if (rc.kind == 1)
-                        | then |> libs/metal:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
+                        | then |> libs/canvas:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
                     | drained |> std/store:stored { world.drew: 1 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
-        ! close |> libs/metal:quit()
-        | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("spec: closed")
+        ! key-down k when k.code == 53 |> libs/canvas:quit()
+        ! close |> libs/canvas:quit()
+        | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("spec: closed")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

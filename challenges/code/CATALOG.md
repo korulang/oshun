@@ -1,7 +1,7 @@
 # CODE_CHALLENGE catalog
 
 Finished code-surface components from `CHALLENGE.md`. Each entry is a
-named component in `components/` + a runnable `metal/tests/code_*.k`
+named component in `components/` + a runnable `canvas/tests/code_*.k`
 demo.
 
 The catalog is the long-running artifact; each replay is one slice
@@ -23,5 +23,5 @@ through it.
 | code-02 | unified diff | `code_diffview:diffview` | `diff-load` parses hunks at mint; old/new gutters, add/remove/context tint, `+adds −dels in N hunks` stat, truncation counted | PARSE005 — redundant label on punned field |
 | code-03 | agent turn | `code_turnview:turnview` | gate.json sidecar → pearl turn card: prompt, verdict chip, tool receipt; honest empty/no-match states | `tvpiece` store declared mid-iteration — arm needed the same file |
 
-Gallery dispatch: `metal/tests/gallery.k` torks 7–9 showcase all three
+Gallery dispatch: `canvas/tests/gallery.k` torks 7–9 showcase all three
 on the champagne stage card, clicked from the sidebar catalog.

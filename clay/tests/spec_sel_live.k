@@ -29,7 +29,7 @@
 // click on empty space or chrome deselects — palette slides, chips rekey,
 // the element tints. The scripted sibling spec_sel.k pins pixel snaps.
 //
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import std/store
@@ -92,16 +92,16 @@ std/store:new(tools, capacity: 32) {
 // a complete table.
 std/store:new(hit, capacity: 64) { seq: i64, tool: i64, x: f64, y: f64, w: f64, h: f64 }
 libs/clay:init(width: 640, height: 400)
-| cl h |> libs/metal:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:image.load(win: w, path: "test.png")
+| cl h |> libs/canvas:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:image.load(win: w, path: "test.png")
                 | img t |> std/store:stored { world.tex: t }
                 | err e |> std/io:print.ln(e)
-            |> libs/metal:frames(win: w, count: 9999)
+            |> libs/canvas:frames(win: w, count: 9999)
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1 }
                     |> std/store:clear(hit)
-                    |> libs/metal:window.size(win: w): wh
+                    |> libs/canvas:window.size(win: w): wh
                     |> std/store:stored { wins.w: wh.w, wins.h: wh.h }
                     |> libs/clay:dims(cl: h, width: wh.w, height: wh.h)
                     // Selection drivers: Tab and click are the only writers.
@@ -295,15 +295,15 @@ libs/clay:init(width: 640, height: 400)
                                     // Hit rows key on rc.ud — the spec ordinal stamped
                                     // via decl.userData (ud - 1; ud 0 = chrome), so
                                     // command-less rows can't shift the mapping.
-                                    |> libs/metal:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
+                                    |> libs/canvas:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
                             ! cmd rc |> if (rc.kind == 3)
                                 | then |> std/store:insert(hit) { seq: rc.ud - 1, tool: if (rc.ud == 0) 1 else 0, rc.x, rc.y, rc.w, rc.h }
                                     // draw.text takes the line box's top-left —
                                     // the command's boundingBox is already that.
-                                    |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
+                                    |> libs/canvas:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
                             ! cmd rc |> if (rc.kind == 4)
                                 | then |> std/store:insert(hit) { seq: rc.ud - 1, tool: if (rc.ud == 0) 1 else 0, rc.x, rc.y, rc.w, rc.h }
-                                    |> libs/metal:draw.image(f, tex: rc.img, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y))
+                                    |> libs/canvas:draw.image(f, tex: rc.img, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y))
                             | drained |> std/store:stored { world.drew: 1 }
                 ! key-down k when k.code == 48
                     |> std/store:stored { world.sel: if (world.sel >= 25) 0 else world.sel + 1, world.dirty: 1 }
@@ -318,8 +318,8 @@ libs/clay:init(width: 640, height: 400)
                         ! query hi when hi.tool == 0 and world.hitool == 0 and e.x >= hi.x and e.x < hi.x + hi.w and e.y >= hi.y and e.y < hi.y + hi.h
                             |> std/store:stored { world.sel: hi.seq }
                     |> std/store:stored { world.dirty: 1 }
-                ! key-down k when k.code == 53 |> libs/metal:quit()
-                ! close |> libs/metal:quit()
-                | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
+                ! key-down k when k.code == 53 |> libs/canvas:quit()
+                ! close |> libs/canvas:quit()
+                | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

@@ -1199,6 +1199,21 @@ pub const Mic = struct { unit: Id };
     var cb = RenderCB{ .proc = @ptrCast(&micRenderCb), .refcon = null };
     st = AudioUnitSetProperty(unit, 23, 0, 0, &cb, @sizeOf(RenderCB)); // SetRenderCallback
     if (st != 0) return .{ .err = st * 100 + 7 };
+    // VPIO ducks other apps' audio by default (call-session behavior). The
+    // macOS 14+ OtherAudioDuckingConfiguration takes it to Min with advanced
+    // ducking off — there is no literal "off" short of BypassVoiceProcessing
+    // (2100), which would also kill AEC/AGC.
+    const DuckCfg = extern struct { en: u8, level: u32 };
+    var duck = DuckCfg{ .en = 0, .level = 10 };
+    st = AudioUnitSetProperty(unit, 2108, 0, 0, &duck, @sizeOf(DuckCfg));
+    if (st != 0) return .{ .err = st * 100 + 10 };
+    // Ducking persists at Min — macOS treats VPIO activation as a voice
+    // session regardless. BypassVoiceProcessing (2100) drops the whole
+    // voice chain: AEC, AGC, NS, and ducking. Cost: speaker audio now
+    // reaches the mic raw — music bleeds into transcripts.
+    var bypass: u32 = 1;
+    st = AudioUnitSetProperty(unit, 2100, 0, 0, &bypass, 4);
+    if (st != 0) return .{ .err = st * 100 + 11 };
     st = AudioUnitInitialize(unit);
     if (st != 0) return .{ .err = st * 100 + 8 };
     st = AudioOutputUnitStart(unit);
@@ -1216,6 +1231,20 @@ pub const Mic = struct { unit: Id };
     _ = AudioUnitUninitialize(mic.unit);
     _ = AudioComponentInstanceDispose(mic.unit);
     std.heap.page_allocator.destroy(mic);
+}
+
+// Pause/resume capture without disposing — the unit stops feeding the
+// ring (mic indicator releases) but the Mic token stays live, so the
+// hold→resume cycle costs a restart, not a re-init. Dictation's
+// press→resume / release→hold pair keeps the mic closed while idle.
+~pub tor mic.hold { mic: *Mic<live> }
+~proc mic.hold|zig {
+    _ = AudioOutputUnitStop(mic.unit);
+}
+
+~pub tor mic.resume { mic: *Mic<live> }
+~proc mic.resume|zig {
+    _ = AudioOutputUnitStart(mic.unit);
 }
 
 // RMS energy of the most recent ring samples — the live-waveform feed.

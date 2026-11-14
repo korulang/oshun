@@ -1,6 +1,6 @@
 # Flow binding & arm-scoping friction found during the image spike
 
-Surfaced wiring `libs/metal:image.load` into `spec_sel_live.k` (2026-10-18,
+Surfaced wiring `libs/canvas:image.load` into `spec_sel_live.k` (2026-10-18,
 koru-libs working tree). Several of these are probably compiler bugs; each
 section has the failing shape and the shape that worked. Pin candidates live
 best in `~/src/koru/tests/regression/` — the shapes below should minimize
@@ -12,7 +12,7 @@ cleanly.
 (`result_..._img`), not under the arm name. The payload is unreachable:
 
 ```koru
-| then |> libs/metal:image.load(win: w, path: "test.png")
+| then |> libs/canvas:image.load(win: w, path: "test.png")
     | img |> stored { world.tex: img.tex }   # emitted: img never declared
 ```
 

@@ -1,4 +1,4 @@
-// @korulang/components — OMNI's element vocabulary above libs/metal.
+// @korulang/components — OMNI's element vocabulary above libs/canvas.
 //
 // A component is a named draw chain plus a kind tag. A ui store row is a
 // variant-by-convention: `kind` says which fields the render arm reads,
@@ -18,52 +18,52 @@
 //   1 image — decoded texture drawn over the silk card
 //   2 audio — `waveform`: per-bucket sample peaks decoded at mint
 
-~import libs/metal
+~import libs/canvas
 ~import app/omni_img
 
 // The remote glyph — the surface's input grammar made visible.
 // `tex` is an image.load handle of the remote PNG; `glow` drives the
 // champagne outline's flash. Centered at (cx, cy), `h` scales it.
-~pub tor remote { f: *libs/metal:Frame<frame>, tex: i64, cx: f64, cy: f64, h: f64, glow: f64 }
+~pub tor remote { f: *libs/canvas:Frame<frame>, tex: i64, cx: f64, cy: f64, h: f64, glow: f64 }
 
-~remote = libs/metal:draw.shadow(f, x: cx - h * 0.1588 + 6.0, y: cy - h / 2.0 + 12.0, w: h * 0.3176, h, radius: 22.0, blur: 16.0, r: 0.10, g: 0.08, b: 0.05, a: 0.5)
-    |> libs/metal:draw.imagetint(f, tex, x: cx - h * 0.1588 - 4.0, y: cy - h / 2.0 - 4.0, w: h * 0.3176 + 8.0, h: h + 8.0, r: 0.95, g: 0.85, b: 0.4, a: glow)
-    |> libs/metal:draw.image(f, tex, x: cx - h * 0.1588, y: cy - h / 2.0, w: h * 0.3176, h)
+~remote = libs/canvas:draw.shadow(f, x: cx - h * 0.1588 + 6.0, y: cy - h / 2.0 + 12.0, w: h * 0.3176, h, radius: 22.0, blur: 16.0, r: 0.10, g: 0.08, b: 0.05, a: 0.5)
+    |> libs/canvas:draw.imagetint(f, tex, x: cx - h * 0.1588 - 4.0, y: cy - h / 2.0 - 4.0, w: h * 0.3176 + 8.0, h: h + 8.0, r: 0.95, g: 0.85, b: 0.4, a: glow)
+    |> libs/canvas:draw.image(f, tex, x: cx - h * 0.1588, y: cy - h / 2.0, w: h * 0.3176, h)
 
 // A wordmark measures itself — `mark` bookkeeping is the caller's no longer.
 ~pub tor wordmark {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     face: i64, text: string, size: f64, cx: f64, y: f64,
     r: f64, g: f64, b: f64, a: f64,
 }
 
-~wordmark = libs/metal:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
-    |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y, size, font: face, r, g, b, a, text)
+~wordmark = libs/canvas:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
+    |> libs/canvas:draw.textface(f, x: cx - tw / 2.0, y, size, font: face, r, g, b, a, text)
 
 // A small centered caption in the system face — the ink-on-silk voice.
 ~pub tor caption {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     text: string, cx: f64, y: f64, a: f64,
 }
 
-~caption = libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : cw
-    |> libs/metal:draw.text(f, x: cx - cw / 2.0, y, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a, text)
+~caption = libs/canvas:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : cw
+    |> libs/canvas:draw.text(f, x: cx - cw / 2.0, y, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a, text)
 
 // A resource bridge's on-screen presence — the gravitational center its
 // holdings orbit. A nacre core over a soft halo; `glow` breathes like the
 // remote's outline. `text` is the bridge id, inked beneath.
 ~pub tor hub {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     text: string, cx: f64, cy: f64, r: f64, glow: f64,
 }
 
-~hub = libs/metal:draw.roundrect(f, x: cx - r * 1.8, y: cy - r * 1.8, w: r * 3.6, h: r * 3.6, radius: r * 1.8, r: 0.91, g: 0.85, b: 0.72, a: glow * 0.4)
-    |> libs/metal:draw.roundrect(f, x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, r: 0.95, g: 0.88, b: 0.74, a: 0.95)
-    |> libs/metal:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : tw
-        |> libs/metal:draw.text(f, x: cx - tw / 2.0, y: cy + r + 10.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: 0.7, text)
+~hub = libs/canvas:draw.roundrect(f, x: cx - r * 1.8, y: cy - r * 1.8, w: r * 3.6, h: r * 3.6, radius: r * 1.8, r: 0.91, g: 0.85, b: 0.72, a: glow * 0.4)
+    |> libs/canvas:draw.roundrect(f, x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, r: 0.95, g: 0.88, b: 0.74, a: 0.95)
+    |> libs/canvas:text.offset(win, text, size: 12.0, face: 0, index: @as(i64, @intCast(text.len))) : tw
+        |> libs/canvas:draw.text(f, x: cx - tw / 2.0, y: cy + r + 10.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: 0.7, text)
 
 // A pressable pill — nanoui's button (widgets.zig, kit/button.zig) carried
 // into the material. The box is MEASURED, not given: width is the shaped
@@ -83,8 +83,8 @@
 //   down     — 1 while the pointer is held
 //   disabled — 1 dims the whole control and drops hover/press
 ~pub tor button {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     text: string, size: f64, face: i64,
     x: f64, y: f64,
     variant: i64, mx: f64, my: f64, down: i64, disabled: i64,
@@ -94,24 +94,24 @@
 // in the alpha expressions, the same modulation remote and hub use (a
 // zero-alpha layer is a no-op). The hit predicate is repeated verbatim;
 // a `|>` chain binds only call results, there is no mid-chain `let`.
-~button = libs/metal:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
-    |> libs/metal:text.ascent(win, size, face) : asc
-    |> libs/metal:text.descent(win, size, face) : desc
+~button = libs/canvas:text.offset(win, text, size, face, index: @as(i64, @intCast(text.len))) : tw
+    |> libs/canvas:text.ascent(win, size, face) : asc
+    |> libs/canvas:text.descent(win, size, face) : desc
     // floor shadow — secondary only; deepens under the pointer
-    |> libs/metal:draw.shadow(f, x, y: y + 1.0 + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, blur: 2.0 + (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 2.0) else 0.0), r: 0.40, g: 0.30, b: 0.16, a: (0.28 + 0.12 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
+    |> libs/canvas:draw.shadow(f, x, y: y + 1.0 + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, blur: 2.0 + (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 2.0) else 0.0), r: 0.40, g: 0.30, b: 0.16, a: (0.28 + 0.12 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
     // secondary body — pearl panel; fill closes up and the hairline
     // warms to gold on hover, presses toward the border tone
-    |> libs/metal:draw.panel(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97 - 0.09 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.94 - 0.11 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.86 - 0.16 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: (0.80 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0), bw: 1.0, br: 0.45 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bg: 0.35 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bb: 0.22 + 0.18 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), ba: (0.55 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
+    |> libs/canvas:draw.panel(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97 - 0.09 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.94 - 0.11 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.86 - 0.16 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: (0.80 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0), bw: 1.0, br: 0.45 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bg: 0.35 + 0.50 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), bb: 0.22 + 0.18 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), ba: (0.55 + 0.20 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 0) @as(f64, 1.0) else 0.0))
     // primary body — ink silk; sheen and pearl rise under the pointer,
     // the body sinks and darkens under the press
-    |> libs/metal:draw.roundrect(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.20 - 0.04 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.15 - 0.03 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.10 - 0.02 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: 0.96 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 1) @as(f64, 1.0) else 0.0))
+    |> libs/canvas:draw.roundrect(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.20 - 0.04 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), g: 0.15 - 0.03 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), b: 0.10 - 0.02 * (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0), a: 0.96 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 1) @as(f64, 1.0) else 0.0))
     // ghost — no body until hot; a pearl wash while hovered or held
-    |> libs/metal:draw.roundrect(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97, g: 0.94, b: 0.86, a: (0.30 + 0.20 * (if (down == 1) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
+    |> libs/canvas:draw.roundrect(f, x, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0), w: tw + size * 1.9, h: size * 2.43, radius: size * 0.57, r: 0.97, g: 0.94, b: 0.86, a: (0.30 + 0.20 * (if (down == 1) @as(f64, 1.0) else 0.0)) * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant == 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
     // hover ring — the champagne focus line outside the body
-    |> libs/metal:draw.panel(f, x: x - 2.0, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) - 2.0, w: tw + size * 1.9 + 4.0, h: size * 2.43 + 4.0, radius: size * 0.57 + 2.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.40, ba: 0.55 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant != 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
+    |> libs/canvas:draw.panel(f, x: x - 2.0, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) - 2.0, w: tw + size * 1.9 + 4.0, h: size * 2.43 + 4.0, radius: size * 0.57 + 2.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.40, ba: 0.55 * (if (disabled == 1) @as(f64, 0.45) else 1.0) * (if (variant != 2 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0))
     // the label — measured-centered: w = tw + 2·size·0.95 puts the run
     // at x + size·0.95; the line box centers on asc/desc, pressed dip
-    |> libs/metal:draw.textface(f, x: x + size * 0.95, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) + (size * 2.43 - asc - desc) / 2.0, size, font: face, r: if (variant == 1) @as(f64, 0.91) else 0.16, g: if (variant == 1) @as(f64, 0.85) else 0.12, b: if (variant == 1) @as(f64, 0.72) else 0.08, a: (if (variant == 2) 0.72 + 0.28 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0) else 0.95) * (if (disabled == 1) @as(f64, 0.45) else 1.0), text)
+    |> libs/canvas:draw.textface(f, x: x + size * 0.95, y: y + (if (down == 1 and mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 0.5) else 0.0) + (size * 2.43 - asc - desc) / 2.0, size, font: face, r: if (variant == 1) @as(f64, 0.91) else 0.16, g: if (variant == 1) @as(f64, 0.85) else 0.12, b: if (variant == 1) @as(f64, 0.72) else 0.08, a: (if (variant == 2) 0.72 + 0.28 * (if (mx >= x and mx <= x + tw + size * 1.9 and my >= y and my <= y + size * 2.43 and disabled == 0) @as(f64, 1.0) else 0.0) else 0.95) * (if (disabled == 1) @as(f64, 0.45) else 1.0), text)
 
 // A waveform — what an audio resource IS, drawn from its own bytes.
 // `slot` is the custody-plane slot the bridge minted; the peaks were
@@ -126,20 +126,20 @@
 // Bars sit inside (x, y, w, h): bucket i's slot is w/n wide, its bar
 // spans lo→hi scaled to 88% of the half-height around the centerline.
 ~pub tor waveform {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     slot: i64,
     x: f64, y: f64, w: f64, h: f64, a: f64,
 }
 
-~waveform = libs/metal:draw.rect(f, x, y: y + h / 2.0 - 0.5, w, h: 1.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.30)
+~waveform = libs/canvas:draw.rect(f, x, y: y + h / 2.0 - 0.5, w, h: 1.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.30)
     |> app/omni_img:res-wave-n(slot) : wn
         |> if (wn > 0)
             | then |> app/omni_img:res-wave-each(slot)
-                ! peak p |> libs/metal:draw.roundrect(f, x: x + @as(f64, @floatFromInt(p.i)) * w / @as(f64, @floatFromInt(wn)), y: y + h / 2.0 - p.hi * h * 0.44 - h * 0.015, w: @max(1.5, w / @as(f64, @floatFromInt(wn)) - 0.75), h: @max(1.5, (p.hi - p.lo) * h * 0.44 + h * 0.03), radius: @min(2.0, w / @as(f64, @floatFromInt(wn)) * 0.5), r: 0.16, g: 0.12, b: 0.08, a)
+                ! peak p |> libs/canvas:draw.roundrect(f, x: x + @as(f64, @floatFromInt(p.i)) * w / @as(f64, @floatFromInt(wn)), y: y + h / 2.0 - p.hi * h * 0.44 - h * 0.015, w: @max(1.5, w / @as(f64, @floatFromInt(wn)) - 0.75), h: @max(1.5, (p.hi - p.lo) * h * 0.44 + h * 0.03), radius: @min(2.0, w / @as(f64, @floatFromInt(wn)) * 0.5), r: 0.16, g: 0.12, b: 0.08, a)
                 | drained |> app/omni_img:res-transcript-n(slot) : tl
                     |> if (tl > 0)
                         | then |> app/omni_img:res-transcript(slot) : tr
-                            |> libs/metal:draw.text(f, x, y: y + h - 13.0, size: 10.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.8, text: tr)
+                            |> libs/canvas:draw.text(f, x, y: y + h - 13.0, size: 10.0, r: 0.16, g: 0.12, b: 0.08, a: a * 0.8, text: tr)
 
 // A page preview — what a document resource IS, drawn from its own
 // bytes. `slot` is the custody-plane slot the bridge minted; the preview
@@ -153,16 +153,16 @@
 //
 //   docpage(f, slot: r.slot, x, y, w, h, a)
 ~pub tor docpage {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     slot: i64,
     x: f64, y: f64, w: f64, h: f64, a: f64,
 }
 
-~docpage = libs/metal:draw.clip.push(f, x, y, w, h)
+~docpage = libs/canvas:draw.clip.push(f, x, y, w, h)
     |> app/omni_img:res-doc-each(slot)
-        ! row l |> libs/metal:draw.text(f, x: x + 2.0, y: y + @as(f64, @floatFromInt(l.i)) * 13.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.75, l.text)
+        ! row l |> libs/canvas:draw.text(f, x: x + 2.0, y: y + @as(f64, @floatFromInt(l.i)) * 13.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.75, l.text)
         | drained |> _
-        |> libs/metal:draw.clip.pop(f)
+        |> libs/canvas:draw.clip.pop(f)
 
 // code-surface siblings — the code-challenge catalog (turnview renders an
 // agent-turn sidecar; sibling files carry the code_<name>.kz namespace).

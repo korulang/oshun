@@ -24,7 +24,7 @@
 // Scripted twin: input.* drivers on fixed frames — grow the list by slider
 // (snap 16), shrink it back (snap 28), quit at 30.
 //
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import oshun
@@ -114,8 +114,8 @@ oshun:component(seed, spec) {
 }
 
 libs/clay:init(width: 640, height: 480)
-| cl h |> libs/metal:window.open(width: 640, height: 480, title: "omni gallery — components")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+| cl h |> libs/canvas:window.open(width: 640, height: 480, title: "omni gallery — components")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
             |> seed(which: "gallery", bn: 1, gn: 2)
             // --live skips the scripted drivers; anything else is the
             // deterministic twin (drivers inject at fixed frames).
@@ -127,13 +127,13 @@ libs/clay:init(width: 640, height: 480)
             |> std/args:get(index: 2)
                 | arg b |> std/store:stored { world.demo: if (b == "graft") 9 else if (b == "grown") 15 else if (b == "shrunk") 19 else if (b == "full") 28 else 0 }
                 | out-of-bounds |> std/store:stored { world.demo: 0 }
-            |> libs/metal:frames(win: w, count: if (world.live == 1) 999999 else 9999)
+            |> libs/canvas:frames(win: w, count: if (world.live == 1) 999999 else 9999)
                 ! frame f
                     |> std/store:stored { world.frame: world.frame + 1 }
                     |> std/store:clear(hit)
                     |> std/store:clear(view)
                     |> std/store:clear(uids)
-                    |> libs/metal:window.size(win: w): wh
+                    |> libs/canvas:window.size(win: w): wh
                     |> std/store:stored { wins.w: wh.w, wins.h: wh.h }
                     |> libs/clay:dims(cl: h, width: wh.w, height: wh.h)
                     // Resolve component state: defaults, then latest-per-key
@@ -229,44 +229,44 @@ libs/clay:init(width: 640, height: 480)
                         world.r1: @min(world.icount, @as(i64, @intFromFloat(@floor((fworld.scroll + fworld.ly1 - fworld.ly0) / 36.0))))
                     }
                     |> if (world.frame == 3 and (world.live == 0 or 3 <= world.demo))
-                        | then |> libs/metal:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 200.0)
+                        | then |> libs/canvas:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 200.0)
                     |> if (world.frame == 4 and (world.live == 0 or 4 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 410.0, y: 128.0)
+                        | then |> libs/canvas:input.mouse(x: 410.0, y: 128.0)
                     |> if (world.frame == 5 and (world.live == 0 or 5 <= world.demo))
-                        | then |> libs/metal:input.up(x: 410.0, y: 128.0)
+                        | then |> libs/canvas:input.up(x: 410.0, y: 128.0)
                     |> if (world.frame == 6 and (world.live == 0 or 6 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 400.0, y: 208.0)
+                        | then |> libs/canvas:input.mouse(x: 400.0, y: 208.0)
                     |> if (world.frame == 7 and (world.live == 0 or 7 <= world.demo))
-                        | then |> libs/metal:input.up(x: 400.0, y: 208.0)
+                        | then |> libs/canvas:input.up(x: 400.0, y: 208.0)
                     |> if (world.frame == 8 and (world.live == 0 or 8 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 560.0, y: 80.0)
+                        | then |> libs/canvas:input.mouse(x: 560.0, y: 80.0)
                     |> if (world.frame == 9 and (world.live == 0 or 9 <= world.demo))
-                        | then |> libs/metal:input.up(x: 560.0, y: 80.0)
+                        | then |> libs/canvas:input.up(x: 560.0, y: 80.0)
                     |> if (world.frame == 10 and (world.live == 0 or 10 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 400.0, y: 272.0)
+                        | then |> libs/canvas:input.mouse(x: 400.0, y: 272.0)
                     |> if (world.frame == 11 and (world.live == 0 or 11 <= world.demo))
-                        | then |> libs/metal:input.drag(x: 300.0, y: 272.0)
+                        | then |> libs/canvas:input.drag(x: 300.0, y: 272.0)
                     |> if (world.frame == 12 and (world.live == 0 or 12 <= world.demo))
-                        | then |> libs/metal:input.up(x: 300.0, y: 272.0)
+                        | then |> libs/canvas:input.up(x: 300.0, y: 272.0)
                     |> if (world.frame == 13 and (world.live == 0 or 13 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 150.0, y: 48.0)
+                        | then |> libs/canvas:input.mouse(x: 150.0, y: 48.0)
                     |> if (world.frame == 14 and (world.live == 0 or 14 <= world.demo))
-                        | then |> libs/metal:input.up(x: 150.0, y: 48.0)
-                            |> libs/metal:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 2000.0)
+                        | then |> libs/canvas:input.up(x: 150.0, y: 48.0)
+                            |> libs/canvas:input.scroll(x: 100.0, y: 200.0, dx: 0.0, dy: 0.0 - 2000.0)
                     |> if (world.frame == 16 and (world.live == 0 or 16 <= world.demo))
-                        | then |> libs/metal:window.snap(path: "/tmp/gallery_comp_snap.bmp")
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_comp_snap.bmp")
                     |> if (world.frame == 17 and (world.live == 0 or 17 <= world.demo))
-                        | then |> libs/metal:input.mouse(x: 400.0, y: 272.0)
+                        | then |> libs/canvas:input.mouse(x: 400.0, y: 272.0)
                     |> if (world.frame == 18 and (world.live == 0 or 18 <= world.demo))
-                        | then |> libs/metal:input.drag(x: 256.0, y: 272.0)
+                        | then |> libs/canvas:input.drag(x: 256.0, y: 272.0)
                     |> if (world.frame == 19 and (world.live == 0 or 19 <= world.demo))
-                        | then |> libs/metal:input.up(x: 256.0, y: 272.0)
+                        | then |> libs/canvas:input.up(x: 256.0, y: 272.0)
                     |> if (world.frame == 28 and (world.live == 0 or 28 <= world.demo))
-                        | then |> libs/metal:window.snap(path: "/tmp/gallery_comp_snap2.bmp")
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_comp_snap2.bmp")
                     // A named preset documents itself: two frames after the
                     // replay cutoff the layout has settled — write the snap.
                     |> if (world.demo > 0 and world.frame == world.demo + 2)
-                        | then |> libs/metal:window.snap(path: "/tmp/gallery_comp_preset.bmp")
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_comp_preset.bmp")
                     // EMIT — blind over view: close-to the row's depth,
                     // dispatch on the primitive kind. No state reads;
                     // expansion already baked them.
@@ -287,30 +287,30 @@ libs/clay:init(width: 640, height: 480)
                         | solved cls |> libs/clay:each(cl: cls)
                             ! cmd rc |> if (rc.kind == 1)
                                 | then |> std/store:insert(hit) { seq: rc.ud, cl: world.ic, rc.x, rc.y, rc.w, rc.h }
-                                    |> libs/metal:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
+                                    |> libs/canvas:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
                                     |> if (rc.ud == world.sliderh)
                                         | then |> std/store:stored { fworld.sx: rc.x, fworld.sw: rc.w }
-                                            |> libs/metal:draw.rect(f, x: @round(rc.x + fworld.slider * (rc.w - 14.0)), y: @round(rc.y - 4.0), w: 14.0, h: 18.0, r: 120.0, g: 170.0, b: 240.0, a: 255.0)
+                                            |> libs/canvas:draw.rect(f, x: @round(rc.x + fworld.slider * (rc.w - 14.0)), y: @round(rc.y - 4.0), w: 14.0, h: 18.0, r: 120.0, g: 170.0, b: 240.0, a: 255.0)
                             ! cmd rc |> if (rc.kind == 3)
                                 | then |> std/store:insert(hit) { seq: rc.ud, cl: world.ic, rc.x, rc.y, rc.w, rc.h }
-                                    |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
+                                    |> libs/canvas:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
                                     |> if (rc.ud == world.labelh)
                                         | then |> libs/clay:measure.text(tx: "clicks: ", fs: 13.0, ls: 0.0): cd
                                             |> std/string:from-int(n: world.clicks)
-                                                | ok cn |> libs/metal:draw.text(f, x: @round(rc.x + cd.w), y: @round(rc.y), size: 13.0, r: 170.0, g: 176.0, b: 196.0, a: 255.0, text: cn.data)
+                                                | ok cn |> libs/canvas:draw.text(f, x: @round(rc.x + cd.w), y: @round(rc.y), size: 13.0, r: 170.0, g: 176.0, b: 196.0, a: 255.0, text: cn.data)
                                                     |> std/string:free(s: cn)
                                                 | err e1 |> std/io:print.ln(e1)
                             ! cmd rc |> if (rc.kind == 5)
                                 | then |> std/store:stored { world.ic: 1 }
                                     |> std/store:stored { fworld.lx0: rc.x, fworld.ly0: rc.y, fworld.lx1: rc.x + rc.w, fworld.ly1: rc.y + rc.h }
-                                    |> libs/metal:draw.clip.push(f, rc.x, rc.y, rc.w, rc.h)
+                                    |> libs/canvas:draw.clip.push(f, rc.x, rc.y, rc.w, rc.h)
                             ! cmd rc |> if (rc.kind == 6)
-                                | then |> libs/metal:draw.clip.pop(f)
+                                | then |> libs/canvas:draw.clip.pop(f)
                                     |> std/store:stored { world.ic: 0 }
                             | drained |> std/store:stored { world.frame: world.frame }
                     |> if (world.frame == 30 and (world.live == 0 or 30 <= world.demo))
-                        | then |> libs/metal:quit()
-                ! key-down k when k.code == 53 |> libs/metal:quit()
+                        | then |> libs/canvas:quit()
+                ! key-down k when k.code == 53 |> libs/canvas:quit()
                 ! mouse-move e
                     |> std/store:stored { world.hover: -1 }
                     |> std/store:query(hit)
@@ -368,7 +368,7 @@ libs/clay:init(width: 640, height: 480)
                 ! scroll e
                     |> if (e.x >= fworld.lx0 and e.x < fworld.lx1 and e.y >= fworld.ly0 and e.y < fworld.ly1)
                         | then |> std/store:stored { fworld.scroll: @min(@max(0.0, fworld.scroll - e.dy), @max(0.0, @as(f64, @floatFromInt(world.icount + 1)) * 36.0 + 10.0 - (fworld.ly1 - fworld.ly0))) }
-                ! close |> libs/metal:quit()
-                | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("clicks: {{ world.clicks:d }} tog: {{ world.tog:d }} tab: {{ world.tab:d }} sel: {{ world.sel:d }} scroll: {{ fworld.scroll:f }} slider: {{ fworld.slider:f }}") |> std/io:print.ln("gallery_comp: closed (snapped)")
+                ! close |> libs/canvas:quit()
+                | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("clicks: {{ world.clicks:d }} tog: {{ world.tog:d }} tab: {{ world.tab:d }} sel: {{ world.sel:d }} scroll: {{ fworld.scroll:f }} slider: {{ fworld.slider:f }}") |> std/io:print.ln("gallery_comp: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e3 |> std/io:print.ln("clay init failed: {{ e3:s }}")

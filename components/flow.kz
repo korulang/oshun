@@ -1,5 +1,5 @@
 // @korulang/components/flow — a current of ink. Five stroked quadratic
-// Béziers sweep the field edge to edge on libs/metal's draw.bezier (inst
+// Béziers sweep the field edge to edge on libs/canvas's draw.bezier (inst
 // kind 7 — true distance-to-curve strokes, round caps, constant width
 // through the bend). `t` is seconds; each control point breathes on its
 // own slow sine so the piece is alive under --live and deterministic
@@ -12,11 +12,11 @@
 // never kiss the field edge. Top to bottom: ink hairline, sepia,
 // deepest-ink hero, bronze, ink hairline — widths 1.5/2.6/3.4/2.0/1.3.
 
-~import libs/metal
+~import libs/canvas
 ~import libs/math
 
 ~pub tor flow {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     cx: f64, cy: f64, w: f64, h: f64, t: f64, a: f64,
 }
 
@@ -25,8 +25,8 @@
     |> libs/math:sin(x: t * 0.71 + 3.8) : s2
     |> libs/math:sin(x: t * 0.57 + 5.7) : s3
     |> libs/math:sin(x: t * 0.66 + 2.6) : s4
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.167, x1: cx - w * 0.05, y1: cy - h * 0.5 + h * 0.167 + h * 0.10 * s0, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.167, w: 1.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.75)
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.333, x1: cx + w * 0.06, y1: cy - h * 0.5 + h * 0.333 - h * 0.13 * s1, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.333, w: 2.6, r: 0.40, g: 0.28, b: 0.17, a: a * 0.85)
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.46, y0: cy, x1: cx - w * 0.03, y1: cy + h * 0.09 * s2, x2: cx + w * 0.46, y2: cy, w: 3.4, r: 0.30, g: 0.20, b: 0.11, a: a * 0.95)
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.667, x1: cx + w * 0.08, y1: cy - h * 0.5 + h * 0.667 + h * 0.12 * s3, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.667, w: 2.0, r: 0.52, g: 0.40, b: 0.24, a: a * 0.80)
-    |> libs/metal:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.833, x1: cx - w * 0.07, y1: cy - h * 0.5 + h * 0.833 - h * 0.11 * s4, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.833, w: 1.3, r: 0.16, g: 0.12, b: 0.08, a: a * 0.70)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.167, x1: cx - w * 0.05, y1: cy - h * 0.5 + h * 0.167 + h * 0.10 * s0, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.167, w: 1.5, r: 0.16, g: 0.12, b: 0.08, a: a * 0.75)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.333, x1: cx + w * 0.06, y1: cy - h * 0.5 + h * 0.333 - h * 0.13 * s1, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.333, w: 2.6, r: 0.40, g: 0.28, b: 0.17, a: a * 0.85)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.46, y0: cy, x1: cx - w * 0.03, y1: cy + h * 0.09 * s2, x2: cx + w * 0.46, y2: cy, w: 3.4, r: 0.30, g: 0.20, b: 0.11, a: a * 0.95)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.667, x1: cx + w * 0.08, y1: cy - h * 0.5 + h * 0.667 + h * 0.12 * s3, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.667, w: 2.0, r: 0.52, g: 0.40, b: 0.24, a: a * 0.80)
+    |> libs/canvas:draw.bezier(f, x0: cx - w * 0.46, y0: cy - h * 0.5 + h * 0.833, x1: cx - w * 0.07, y1: cy - h * 0.5 + h * 0.833 - h * 0.11 * s4, x2: cx + w * 0.46, y2: cy - h * 0.5 + h * 0.833, w: 1.3, r: 0.16, g: 0.12, b: 0.08, a: a * 0.70)

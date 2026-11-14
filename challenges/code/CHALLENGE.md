@@ -52,7 +52,7 @@ the boundary is the tor.
 - `draw.clip.push/pop`, `draw.panel`, scroll input events.
 - `components:index.kz` tors — `docpage` is the seed to diverge from
   (it proves the live-bytes rule: card text comes from the file).
-- Demos: `metal/tests/viz_*.k`, `comp_*.k` — cheap standalone compiles;
+- Demos: `canvas/tests/viz_*.k`, `comp_*.k` — cheap standalone compiles;
   **do not rebuild commander.k** (`KORU_COMPILE_MEM_MB=8192`, slow).
 
 ## You are the contestant
@@ -71,7 +71,7 @@ count), `turnview` (prompt + streamed items by kind), `markdown`
 ## THE BAR — derived, never authored (non-negotiable)
 
 1. The component is a **named tor** in `components/` — draw chain over
-   `libs/metal` verbs, callable with real input (text/path/handle).
+   `libs/canvas` verbs, callable with real input (text/path/handle).
 2. Content comes from **real bytes** — a real source file on disk, a
    real diff, a real session sidecar. Lorem ipsum is disqualified.
 3. Structure is real, not painted: gutter aligns to lines, diff colors
@@ -106,7 +106,7 @@ landing.
   import it. That append is the only shared-file write you're allowed;
   if it collides with a sibling replay, the arbiter reconciles at
   landing — a one-line append is trivially recoverable.
-- **Demo:** `metal/tests/code_<name>.k` — compiles via `koruc
+- **Demo:** `canvas/tests/code_<name>.k` — compiles via `koruc
   code_<name>.k -o code_<name>.zig` or `koruc build`; emit names are
   yours. Snapshot via `offscreen.snap` where a window would interrupt
   the walker's screen.
@@ -116,7 +116,7 @@ landing.
   survivors and sweeps losers. Petals fall as untracked files, not
   history.
 
-Touch `metal/index.kz` only for a new primitive. Clean code rejected →
+Touch `canvas/index.kz` only for a new primitive. Clean code rejected →
 STOP, float, pin, no route-around.
 
 ## Done-gates
@@ -134,8 +134,8 @@ STOP, float, pin, no route-around.
 ## Self-ground — never invent
 
 - Custody/kind law: `/Users/larsde/src/omni/SCENE.md` (derived, never
-  authored), `app/omni_img.kz`, `metal/tests/commander.k`
-- The dialect: `components/index.kz`, `metal/index.kz`
+  authored), `app/omni_img.kz`, `canvas/tests/commander.k`
+- The dialect: `components/index.kz`, `canvas/index.kz`
 - Koru law: `/Users/larsde/src/koru/tests/regression`
 - Survey: `challenges/TOOLKITS.md` — the merged vocabulary map
 - Compiler: `/Users/larsde/src/koru` → `zig-out/bin/koruc`

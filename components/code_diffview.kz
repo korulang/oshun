@@ -16,7 +16,7 @@
 //       diffview(f, slot, face: mono, x, y, w, h, scroll: 0.0, t, a)
 //
 //   slot   — a diff-load slot: real parsed bytes, not a painted shape
-//   face   — a mono font handle: libs/metal:font.load in a windowed
+//   face   — a mono font handle: libs/canvas:font.load in a windowed
 //            host, diff-font on a headless surface
 //   scroll — scroll offset in LINE units; fractional drifts smoothly
 //   t      — entry progress in seconds since mount; the caller drives
@@ -31,7 +31,7 @@
 // handles draw.textface consumes — the numbers are the renderer's,
 // never assumed metrics.
 
-~import libs/metal
+~import libs/canvas
 
 const std = @import("std");
 const M = @import("root").koru_libs.koru_metal;
@@ -326,7 +326,7 @@ var row_len: [MAX_SLOTS][MAX_ROWS]u16 = undefined;
 
 // The shaped width of `text` on the frame's own shaper — text.offset's
 // surface-side twin; a span lands where the renderer will put it.
-~[retain]pub tor diff-measure { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64 } -> f64
+~[retain]pub tor diff-measure { f: *libs/canvas:Frame<frame>, text: string, size: f64, face: i64 } -> f64
 
 ~proc diff-measure|zig {
     return @floatCast(f.text.layout(text, face, @floatCast(size)).width);
@@ -335,7 +335,7 @@ var row_len: [MAX_SLOTS][MAX_ROWS]u16 = undefined;
 // The measured line height — ascent + descent at this size and face,
 // padded to the code rhythm. Baselines are derived, never guessed:
 // textTop = rowTop + lh/6 centers the asc+desc box inside lh.
-~[retain]pub tor diff-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+~[retain]pub tor diff-lineh { f: *libs/canvas:Frame<frame>, size: f64, face: i64 } -> f64
 
 ~proc diff-lineh|zig {
     const ft = f.text.font(face, @floatCast(size));
@@ -380,7 +380,7 @@ var diff_stat_buf: [64]u8 = undefined;
 // per-kind bands and text, the old|new gutter, the @@ band — and the
 // scroll rail when the diff is taller than the card.
 ~pub tor diffview {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     slot: i64, face: i64,
     x: f64, y: f64, w: f64, h: f64,
     scroll: f64, t: f64, a: f64,
@@ -399,20 +399,20 @@ var diff_stat_buf: [64]u8 = undefined;
     |> diff-path(slot) : pth
     |> diff-tail(path: pth) : ttl
     // floor shadow — the card floats over the room's silk
-    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - ce) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * ce)
+    |> libs/canvas:draw.shadow(f, x: x + 4.0, y: y + (1.0 - ce) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * ce)
     // ink body — the dark silk pane the material puts code on
-    |> libs/metal:draw.roundrect(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * ce)
+    |> libs/canvas:draw.roundrect(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * ce)
     // champagne hairline around the body
-    |> libs/metal:draw.panel(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * ce)
+    |> libs/canvas:draw.panel(f, x, y: y + (1.0 - ce) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * ce)
     // header — the file's basename left, its real stats right
-    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - ce) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * ce, text: ttl)
-    |> libs/metal:draw.textface(f, x: x + w - 16.0 - sw, y: y + (1.0 - ce) * 14.0 + 10.0, size: 10.5, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * ce, text: stat)
+    |> libs/canvas:draw.textface(f, x: x + 16.0, y: y + (1.0 - ce) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * ce, text: ttl)
+    |> libs/canvas:draw.textface(f, x: x + w - 16.0 - sw, y: y + (1.0 - ce) * 14.0 + 10.0, size: 10.5, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * ce, text: stat)
     // the header rule and the gutter rule — champagne hairlines
-    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - ce) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * ce)
-    |> libs/metal:draw.rect(f, x: x + 16.0 + gw * 2.0 + 22.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
+    |> libs/canvas:draw.rect(f, x: x + 1.0, y: y + (1.0 - ce) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * ce)
+    |> libs/canvas:draw.rect(f, x: x + 16.0 + gw * 2.0 + 22.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
     // the rows — clipped below the header; a slot with zero parsed rows
     // says so in its empty state, inventing no text
-    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> libs/canvas:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
     |> diff-each(slot)
         ! row r |> diff-rise(t, r.hunk) : ru
             |> diff-ease(u: ru) : e
@@ -421,31 +421,31 @@ var diff_stat_buf: [64]u8 = undefined;
             |> diff-rowtop(y, r.i, scroll, lh, ce, e) : ry
             // the row band — green over ink for adds, red for removes,
             // a champagne wash for the @@ header; ctx/meta carry none
-            |> libs/metal:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: lh, r: if (r.kind == 1) @as(f64, 0.35) else (if (r.kind == 2) @as(f64, 0.80) else 0.95), g: if (r.kind == 1) @as(f64, 0.75) else (if (r.kind == 2) @as(f64, 0.30) else 0.85), b: if (r.kind == 1) @as(f64, 0.45) else (if (r.kind == 2) @as(f64, 0.25) else 0.45), a: e * (if (r.kind == 1) @as(f64, 0.16) else (if (r.kind == 2) @as(f64, 0.15) else (if (r.kind == 3) @as(f64, 0.12) else 0.0))))
+            |> libs/canvas:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: lh, r: if (r.kind == 1) @as(f64, 0.35) else (if (r.kind == 2) @as(f64, 0.80) else 0.95), g: if (r.kind == 1) @as(f64, 0.75) else (if (r.kind == 2) @as(f64, 0.30) else 0.85), b: if (r.kind == 1) @as(f64, 0.45) else (if (r.kind == 2) @as(f64, 0.25) else 0.45), a: e * (if (r.kind == 1) @as(f64, 0.16) else (if (r.kind == 2) @as(f64, 0.15) else (if (r.kind == 3) @as(f64, 0.12) else 0.0))))
             // a hairline separator above every hunk header
             |> if (r.kind == 3)
-                | then |> libs/metal:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: e * 0.30)
+                | then |> libs/canvas:draw.rect(f, x: x + 1.0, y: ry, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: e * 0.30)
             // old-side gutter number — right-aligned on the shaped width;
             // the cell stays empty where a row has no old-side number
             |> diff-measure(f, text: r.old_s, size: 10.0, face) : ow
             |> if (r.old_s.len > 0)
-                | then |> libs/metal:draw.textface(f, x: x + 16.0 + gw - ow, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.old_s)
+                | then |> libs/canvas:draw.textface(f, x: x + 16.0 + gw - ow, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.old_s)
             // new-side gutter number — the second column, same alignment
             |> diff-measure(f, text: r.new_s, size: 10.0, face) : nw
             |> if (r.new_s.len > 0)
-                | then |> libs/metal:draw.textface(f, x: x + 16.0 + gw + 6.0 + gw - nw, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.new_s)
+                | then |> libs/canvas:draw.textface(f, x: x + 16.0 + gw + 6.0 + gw - nw, y: ry + lh / 6.0, size: 10.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * e * 0.9, text: r.new_s)
             // the line itself — the +/- prefix byte included, colored by
             // the kind the parser read off the real bytes
-            |> libs/metal:draw.textface(f, x: x + 16.0 + gw * 2.0 + 32.0, y: ry + lh / 6.0, size: 13.0, font: face,
+            |> libs/canvas:draw.textface(f, x: x + 16.0 + gw * 2.0 + 32.0, y: ry + lh / 6.0, size: 13.0, font: face,
                 r: if (r.kind == 1) @as(f64, 0.45) else (if (r.kind == 2) @as(f64, 0.95) else (if (r.kind == 3) @as(f64, 0.95) else (if (r.kind == 4) @as(f64, 0.62) else 0.88))),
                 g: if (r.kind == 1) @as(f64, 0.85) else (if (r.kind == 2) @as(f64, 0.55) else (if (r.kind == 3) @as(f64, 0.83) else (if (r.kind == 4) @as(f64, 0.55) else 0.85))),
                 b: if (r.kind == 1) @as(f64, 0.55) else (if (r.kind == 2) @as(f64, 0.50) else (if (r.kind == 3) @as(f64, 0.55) else (if (r.kind == 4) @as(f64, 0.42) else 0.78))),
                 a: a * e * (if (r.kind == 4) @as(f64, 0.6) else (if (r.kind == 3) @as(f64, 0.9) else 0.92)), r.text)
         | drained |> if (rn == 0)
             | then |> diff-measure(f, text: "empty diff — no rows parsed", size: 12.0, face) : ew
-                |> libs/metal:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - ce) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * ce, text: "empty diff — no rows parsed")
-    |> libs/metal:draw.clip.pop(f)
+                |> libs/canvas:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - ce) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * ce, text: "empty diff — no rows parsed")
+    |> libs/canvas:draw.clip.pop(f)
     // the scroll rail + thumb — only while the diff overflows the view
     |> if (@as(f64, @floatFromInt(rn)) * lh > h - 46.0)
-        | then |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
-            |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(rn)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * ce)
+        | then |> libs/canvas:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * ce)
+            |> libs/canvas:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - ce) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(rn)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(rn)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * ce)

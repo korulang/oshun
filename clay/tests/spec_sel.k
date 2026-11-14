@@ -28,7 +28,7 @@
 // cell chips shown, the row tinted), frame 90 (sel cleared, palette
 // retracted — byte-identical again).
 //
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import std/store
@@ -77,9 +77,9 @@ std/store:new(tools, capacity: 32) {
     tk: i64, cx: f64, cy: f64, px: f64, vis: i64,
 }
 libs/clay:init(width: 640, height: 400)
-| cl h |> libs/metal:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 9999)
+| cl h |> libs/canvas:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 9999)
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             // Selection drivers: scripted (frames 10 selects cell-0 /
@@ -198,13 +198,13 @@ libs/clay:init(width: 640, height: 400)
                                     | then |> std/store:stored { spec[s.parent].cc: spec[s.parent].cc + 1, spec[s.parent].cw: if (s.mw > spec[s.parent].cw) s.mw else spec[s.parent].cw, spec[s.parent].ch: spec[s.parent].ch + s.mh + @as(f64, @floatFromInt(spec[s.parent].gap)) }
                                     | else |> std/store:stored { spec[s.parent].cc: spec[s.parent].cc + 1, spec[s.parent].cw: spec[s.parent].cw + s.mw + @as(f64, @floatFromInt(spec[s.parent].gap)), spec[s.parent].ch: if (s.mh > spec[s.parent].ch) s.mh else spec[s.parent].ch }
             |> if (world.frame == 5)
-                | then |> libs/metal:window.snap(path: "/tmp/omni_sel_idle.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/omni_sel_idle.bmp")
             |> if (world.frame == 45)
-                | then |> libs/metal:window.snap(path: "/tmp/omni_sel_cell.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/omni_sel_cell.bmp")
             |> if (world.frame == 90)
-                | then |> libs/metal:window.snap(path: "/tmp/omni_sel_out.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/omni_sel_out.bmp")
             |> if (world.frame == 100)
-                | then |> libs/metal:quit()
+                | then |> libs/canvas:quit()
             |> libs/clay:layout(cl: h)
                 ! tree t
                     |> std/store:clear(gtrk)
@@ -273,14 +273,14 @@ libs/clay:init(width: 640, height: 400)
                             |> libs/ui:panel(t, dock: "", tl.ws, tl.w, tl.hs, tl.h, tl.dir, tl.gap, tl.pad, tl.ax, tl.ay, tl.r, tl.g, tl.b, tl.a, fl: 1, fx: tl.px + tl.cx, fy: 70.0 + tl.cy)
                 | solved cls |> libs/clay:each(cl: cls)
                     ! cmd rc |> if (rc.kind == 1)
-                        | then |> libs/metal:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
+                        | then |> libs/canvas:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
                     ! cmd rc |> if (rc.kind == 3)
-                        | then |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)  // rc.x/rc.y are the line box's top-left — draw.text's exact input
+                        | then |> libs/canvas:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)  // rc.x/rc.y are the line box's top-left — draw.text's exact input
                     | drained |> std/store:stored { world.drew: 1 }
         ! key-down k when k.code == 48
             |> std/store:stored { world.sel: if (world.sel >= 24) 0 else world.sel + 1, world.dirty: 1 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
-        ! close |> libs/metal:quit()
-        | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
+        ! key-down k when k.code == 53 |> libs/canvas:quit()
+        ! close |> libs/canvas:quit()
+        | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

@@ -21,7 +21,7 @@
 // font registry, same seam as codeview — the numbers are the
 // renderer's, never assumed metrics.
 
-~import libs/metal
+~import libs/canvas
 ~import libs/vt
 
 const std = @import("std");
@@ -55,14 +55,14 @@ const M = @import("root").koru_libs.koru_metal;
 
 // The fixed cell advance — a mono face shapes "0" once and every cell
 // stands on it. Measured, never assumed.
-~[retain]pub tor term-cellw { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+~[retain]pub tor term-cellw { f: *libs/canvas:Frame<frame>, size: f64, face: i64 } -> f64
 
 ~proc term-cellw|zig {
     return @floatCast(f.text.layout("0", face, @floatCast(size)).width);
 }
 
 // The measured line box — ascent + descent at this size and face.
-~[retain]pub tor term-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+~[retain]pub tor term-lineh { f: *libs/canvas:Frame<frame>, size: f64, face: i64 } -> f64
 
 ~proc term-lineh|zig {
     const ft = f.text.font(face, @floatCast(size));
@@ -85,7 +85,7 @@ var term_dims_buf: [24]u8 = undefined;
 // clipped rows of styled runs, the cursor block. `e` is the eased
 // entry — the card rises 14pt and fades in.
 ~pub tor termview {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     term: i64, face: i64,
     x: f64, y: f64, w: f64, h: f64,
     t: f64, a: f64,
@@ -100,22 +100,22 @@ var term_dims_buf: [24]u8 = undefined;
     |> term-cellw(f, size: 13.0, face) : cw
     |> term-lineh(f, size: 13.0, face) : lh
     // floor shadow — the card floats over the room's silk
-    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
+    |> libs/canvas:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
     // ink body — the terminal's own dark
-    |> libs/metal:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.10, g: 0.09, b: 0.11, a: 0.97 * a * e)
+    |> libs/canvas:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.10, g: 0.09, b: 0.11, a: 0.97 * a * e)
     // champagne hairline around the body
-    |> libs/metal:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
+    |> libs/canvas:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
     // header — the session's OSC title (or "term") left, geometry right
     |> libs/vt:term-title-or(h: term, fb: "term") : ttl
-    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
+    |> libs/canvas:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
     |> term-dims-tag(cols: nc, rows: nr) : dt
     |> term-cellw(f, size: 11.0, face) : cwm
-    |> libs/metal:draw.textface(f, x: x + w - 16.0 - cwm * 5.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: dt)
+    |> libs/canvas:draw.textface(f, x: x + w - 16.0 - cwm * 5.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: dt)
     // the header rule — a champagne hairline
-    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
+    |> libs/canvas:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
     // the grid — clipped to the body below the header; runs carry their
     // own colors, empty spans still paint their background
-    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> libs/canvas:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
     |> libs/vt:term-cvis() : cvs
     |> libs/vt:term-cx() : ccx
     |> libs/vt:term-cy() : ccy
@@ -123,20 +123,20 @@ var term_dims_buf: [24]u8 = undefined;
         ! each ry |> libs/vt:term-runs(row: @as(i64, @intCast(ry)))
             ! run ru
                 |> if (ru.bgr >= 0)
-                    | then |> libs/metal:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, w: @as(f64, @floatFromInt(ru.cells)) * cw, h: lh,
+                    | then |> libs/canvas:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, w: @as(f64, @floatFromInt(ru.cells)) * cw, h: lh,
                         r: @as(f64, @floatFromInt(ru.bgr)) / 255.0,
                         g: @as(f64, @floatFromInt(ru.bgg)) / 255.0,
                         b: @as(f64, @floatFromInt(ru.bgb)) / 255.0,
                         a: a * e)
                 |> if (ru.n > 0)
-                    | then |> libs/metal:draw.textface(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, size: 13.0, font: face,
+                    | then |> libs/canvas:draw.textface(f, x: x + 14.0 + @as(f64, @floatFromInt(ru.col)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ry)) * lh, size: 13.0, font: face,
                         r: @as(f64, @floatFromInt(ru.fgr)) / 255.0,
                         g: @as(f64, @floatFromInt(ru.fgg)) / 255.0,
                         b: @as(f64, @floatFromInt(ru.fgb)) / 255.0,
                         a: a * e * if ((ru.flags & 2) != 0) @as(f64, 0.6) else 1.0,
                         ru.text)
             | drained |> _
-    |> libs/metal:draw.clip.pop(f)
+    |> libs/canvas:draw.clip.pop(f)
     // the cursor — a champagne underline where the session's cursor sits
     |> if (cvs == 1)
-        | then |> libs/metal:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ccx)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ccy)) * lh + lh - 3.0, w: cw, h: 2.0, r: 0.95, g: 0.85, b: 0.45, a: 0.9 * a * e)
+        | then |> libs/canvas:draw.rect(f, x: x + 14.0 + @as(f64, @floatFromInt(ccx)) * cw, y: y + (1.0 - e) * 14.0 + 42.0 + @as(f64, @floatFromInt(ccy)) * lh + lh - 3.0, w: cw, h: 2.0, r: 0.95, g: 0.85, b: 0.45, a: 0.9 * a * e)

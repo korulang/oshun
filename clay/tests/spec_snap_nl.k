@@ -10,7 +10,7 @@
 // axis/sizing numerics exactly (fit{0,v} grow{v,v} pct{v,0} fix{v,v},
 // "end"→1 "center"→2); fl!=0 → fat=3 ATTACH_TO_ROOT LEFT_TOP/LEFT_TOP.
 // BMP at /tmp/omni_spec_nl.bmp must byte-match the clay twin's.
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/nativelayout
 import oshun
@@ -85,9 +85,9 @@ oshun:component(seed, spec) {
 }
 
 libs/nativelayout:nl.init(width: 640, height: 400)
-| ncl nh |> libs/metal:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout (nl)")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 9999)
+| ncl nh |> libs/canvas:window.open(width: 640, height: 400, title: "omni s5 — spec-driven layout (nl)")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 9999)
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             |> if (world.frame == 1)
@@ -116,9 +116,9 @@ libs/nativelayout:nl.init(width: 640, height: 400)
                                 ! query p when p.id == s.pid
                                     |> std/store:stored { p.cc: p.cc + 1, p.cw: if (p.dir == "ttb") (if (s.mw > p.cw) s.mw else p.cw) else p.cw + s.mw + @as(f64, @floatFromInt(p.gap)), p.ch: if (p.dir == "ttb") p.ch + s.mh + @as(f64, @floatFromInt(p.gap)) else (if (s.mh > p.ch) s.mh else p.ch) }
             |> if (world.frame == 30)
-                | then |> libs/metal:window.snap(path: "/tmp/omni_spec_nl.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/omni_spec_nl.bmp")
             |> if (world.frame == 45)
-                | then |> libs/metal:quit()
+                | then |> libs/canvas:quit()
             |> libs/nativelayout:nl.layout(cl: nh)
                 ! ntree nt
                     |> std/store:clear(gtrk)
@@ -214,10 +214,10 @@ libs/nativelayout:nl.init(width: 640, height: 400)
                                         bwl: 0, bwr: 0, bwt: 0, bwb: 0, bwc: 0)
                 | nsolved cls |> libs/nativelayout:nl.each(cl: cls)
                     ! cmd rc |> if (rc.kind == 1)
-                        | then |> libs/metal:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
+                        | then |> libs/canvas:draw.rect(f, rc.x, rc.y, rc.w, rc.h, rc.r, rc.g, rc.b, rc.a)
                     | drained |> std/store:stored { world.drew: 1 }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
-        ! close |> libs/metal:quit()
-        | done w2 |> libs/nativelayout:nl.drop(cl: nh) |> libs/metal:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
+        ! key-down k when k.code == 53 |> libs/canvas:quit()
+        ! close |> libs/canvas:quit()
+        | done w2 |> libs/nativelayout:nl.drop(cl: nh) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("spec: closed (snapped)")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("nl init failed: {{ e2:s }}")

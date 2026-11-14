@@ -68,7 +68,7 @@ the law, the path is a label).
 
 - `app/omni_img.kz` + commander.k — custody handles, kind tags, the card
   render path where your dispatch arm lands
-- `libs/metal` — instanced quads, image atlas, text, silk
+- `libs/canvas` — instanced quads, image atlas, text, silk
 - `components/index.kz` — the tor grammar (remote/wordmark/caption/hub)
 - `/tmp/omni_remote_mic_*.wav` — real audio resources on disk RIGHT NOW,
   decoded by `siri_mic_bridge.zig` — a waveform renderer has live data
@@ -79,7 +79,7 @@ the law, the path is a label).
 - **Component:** `components/` (tor + kind-registry line).
 - **Dispatch arm:** where kind dispatch lives today (commander.k's card
   render, or `app/omni_img.kz` — follow the existing structure).
-- **Demo:** `metal/tests/viz_<kind>.k` — renders a resource of that kind
+- **Demo:** `canvas/tests/viz_<kind>.k` — renders a resource of that kind
   through the real dispatch path.
 - **Catalog:** one line in `challenges/visualizer/CATALOG.md`.
 
@@ -100,8 +100,8 @@ doesn't carry what you need — float exact failure + program, pin, stop.
 ## Self-ground — never invent
 
 - Custody/kind law: `/Users/larsde/src/omni/SCENE.md` (law 5: derived,
-  never authored), `app/omni_img.kz`, `metal/tests/commander.k`
-- The dialect: `components/index.kz`, `metal/index.kz`
+  never authored), `app/omni_img.kz`, `canvas/tests/commander.k`
+- The dialect: `components/index.kz`, `canvas/index.kz`
 - Koru law: `/Users/larsde/src/koru/tests/regression`
 - Compiler: `/Users/larsde/src/koru` → `zig-out/bin/koruc`
 

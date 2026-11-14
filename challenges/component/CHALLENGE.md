@@ -42,7 +42,7 @@ The koru-libs generator ports Charm Bubbles. Ours ports **nanoui**
 - `src/ui/textfield.zig` — the text field (selection, composition)
 
 Port the *look and job* into oshun's tor grammar (a named draw chain over
-`libs/metal` + `libs/components` primitives). Do **not** port nanoui's
+`libs/canvas` + `libs/components` primitives). Do **not** port nanoui's
 retained box-tree ceremony — oshun is immediate-mode draw chains; the
 component boundary is the tor, not a widget object.
 
@@ -70,7 +70,7 @@ A catalog entry is a **named reusable component**, not a mini-app.
 **Required:**
 
 1. The component is a **named tor** in `components/` (or a new file under
-   it if the vocabulary is splitting) — `~pub tor <name> { f: *libs/metal:Frame<frame>, ... }`
+   it if the vocabulary is splitting) — `~pub tor <name> { f: *libs/canvas:Frame<frame>, ... }`
    with a draw chain, the same shape as `remote`/`wordmark`/`caption`/`hub`.
 2. The demo **calls the tor** — a reader points at the tor declaration and
    says: that is the component. Chrome, measurement, state — inside the
@@ -92,12 +92,12 @@ A catalog entry is a **named reusable component**, not a mini-app.
 
 - **Tor:** appended to `components/index.kz` (or a sibling file it
   re-exports) with a kind-registry comment line.
-- **Demo:** `metal/tests/comp_<name>.k` — a standalone window demo that
+- **Demo:** `canvas/tests/comp_<name>.k` — a standalone window demo that
   renders the component alone, compiles via koruc, runs on screen.
 - **Catalog:** one line in `challenges/component/CATALOG.md` under Replays —
   name, thesis, walls hit.
 
-Touch `metal/index.kz` **only** for a new *primitive* (a draw verb, an
+Touch `canvas/index.kz` **only** for a new *primitive* (a draw verb, an
 event source). Clean code rejected → **STOP**, float, pin, no route-around.
 
 ## Holes — float and pin, never fix, never route around
@@ -120,11 +120,11 @@ detour inside one.
 
 - Koru law: `/Users/larsde/src/koru/tests/regression`
 - The dialect: `/Users/larsde/src/oshun/components/index.kz`,
-  `metal/index.kz` (draw verbs), `nativelayout/index.kz`, `ui/index.kz`
+  `canvas/index.kz` (draw verbs), `nativelayout/index.kz`, `ui/index.kz`
 - Reference: `/tmp/nanoui` clone (or re-clone `justrach/nanoui`) —
   `src/ui/widgets.zig`, `src/kit/`
 - Compiler: `/Users/larsde/src/koru` → `zig-out/bin/koruc`
-- Do not turn this into an OMNI feature or a metal/ primitive fork
+- Do not turn this into an OMNI feature or a canvas/ primitive fork
 
 ## The taste-gate — Lars
 
@@ -137,5 +137,5 @@ the point.
 Governed like `SCENE.md` — read-many, write-rarely, deliberate, logged.
 
 - 2026-10-23 · planted. Seed catalog = the four tors in `components/index.kz`
-  (remote, wordmark, caption, hub) + `metal/tests/` demos as ground to
+  (remote, wordmark, caption, hub) + `canvas/tests/` demos as ground to
   diverge from.

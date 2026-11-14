@@ -1,7 +1,7 @@
 # COMPONENT_CHALLENGE catalog
 
 Finished oshun surface components from `CHALLENGE.md`. Each entry is a
-named tor in `components/` plus a runnable `metal/tests/comp_*.k` demo;
+named tor in `components/` plus a runnable `canvas/tests/comp_*.k` demo;
 the line names the component, the thesis, and walls floated.
 
 The catalog is the long-running artifact; each replay is one slice through it.

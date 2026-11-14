@@ -11,11 +11,11 @@
 // `tex` is an image.load handle. Ink comes from std/ctx(theme): ir/ig/ib.
 // (cx, cy) centers a w×h pane inside the bx,by,bw,bh backdrop.
 
-~import libs/metal
+~import libs/canvas
 
 ~pub tor glasscard {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     tex: i64,
     cx: f64, cy: f64, w: f64, h: f64,
     bx: f64, by: f64, bw: f64, bh: f64,
@@ -24,10 +24,10 @@
     li: f64, lg: f64, lb: f64,
 }
 
-~glasscard = libs/metal:draw.imagecover(f, tex, x: bx, y: by, w: bw, h: bh)
+~glasscard = libs/canvas:draw.imagecover(f, tex, x: bx, y: by, w: bw, h: bh)
     // freeze the scene, glass the pane — the material IS the card
-    |> libs/metal:draw.capture(f)
-    |> libs/metal:draw.frost(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, rough: 4.0, edge: 10.0, grain: 0.05, milk: 0.12, r: 0.80, g: 0.87, b: 0.97, a: a * 0.9)
+    |> libs/canvas:draw.capture(f)
+    |> libs/canvas:draw.frost(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, rough: 4.0, edge: 10.0, grain: 0.05, milk: 0.12, r: 0.80, g: 0.87, b: 0.97, a: a * 0.9)
     // label — measured center, optical middle
-    |> libs/metal:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
-        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)
+    |> libs/canvas:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
+        |> libs/canvas:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)

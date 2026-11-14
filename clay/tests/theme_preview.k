@@ -19,7 +19,7 @@
 // call site — `self` arrives ambiently from ctx(themes[t]) because
 // each theme row stamps its own handle into `self` at seed. Live
 // re-theme is the handle's job, not ctx's.
-import libs/metal
+import libs/canvas
 import libs/clay
 import libs/ui
 import oshun
@@ -99,13 +99,13 @@ oshun:component(chrome, spec) {
 }
 
 libs/clay:init(width: 640, height: 400)
-| cl h |> libs/metal:window.open(width: 640, height: 400, title: "theme preview — scoped ctx + live handles")
-    | win w |> libs/metal:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
-            |> libs/metal:frames(win: w, count: 9999)
+| cl h |> libs/canvas:window.open(width: 640, height: 400, title: "theme preview — scoped ctx + live handles")
+    | win w |> libs/canvas:window.clear.color(win: w, r: 0.08, g: 0.08, b: 0.11)
+            |> libs/canvas:frames(win: w, count: 9999)
         ! frame f
             |> std/store:stored { world.frame: world.frame + 1 }
             |> std/store:clear(hit)
-            |> libs/metal:window.size(win: w): wh
+            |> libs/canvas:window.size(win: w): wh
             |> libs/clay:dims(cl: h, width: wh.w, height: wh.h)
             |> if (world.frame == 1)
                 | then |> std/store:insert(themes) { r0: 22.0, g0: 24.0, b0: 32.0, r1: 30.0, g1: 33.0, b1: 44.0, r2: 62.0, g2: 120.0, b2: 190.0, r3: 222.0, g3: 226.0, b3: 238.0, fs: 13.0, self: 0 }
@@ -132,32 +132,32 @@ libs/clay:init(width: 640, height: 400)
             //  45 click apply → shell := held = EMBER (moss never touched it)
             // snaps at 30 (preview moss, held ember) and 60 (both ember).
             |> if (world.frame == 10)
-                | then |> libs/metal:input.move(x: 52.0, y: 348.0)
+                | then |> libs/canvas:input.move(x: 52.0, y: 348.0)
             |> if (world.frame == 15)
-                | then |> libs/metal:input.mouse(x: 52.0, y: 348.0)
+                | then |> libs/canvas:input.mouse(x: 52.0, y: 348.0)
             |> if (world.frame == 20)
                 | then |> std/store:query(spec)
                     ! query s when s.scope != 0
                         |> std/io:print.ln("clicked ember — scope {{ s.scope:d }} th {{ s.th:d }} held {{ world.held:d }}")
             |> if (world.frame == 25)
-                | then |> libs/metal:input.move(x: 52.0, y: 384.0)
+                | then |> libs/canvas:input.move(x: 52.0, y: 384.0)
             |> if (world.frame == 30)
                 | then |> std/store:query(spec)
                     ! query s when s.scope != 0
                         |> std/io:print.ln("over moss — scope {{ s.scope:d }} th {{ s.th:d }} held {{ world.held:d }}")
-                        |> libs/metal:window.snap(path: "/tmp/theme_preview_a.bmp")
+                        |> libs/canvas:window.snap(path: "/tmp/theme_preview_a.bmp")
             |> if (world.frame == 35)
-                | then |> libs/metal:input.move(x: 93.0, y: 349.0)
+                | then |> libs/canvas:input.move(x: 93.0, y: 349.0)
             |> if (world.frame == 45)
-                | then |> libs/metal:input.mouse(x: 93.0, y: 349.0)
+                | then |> libs/canvas:input.mouse(x: 93.0, y: 349.0)
             |> if (world.frame == 55)
                 | then |> std/store:query(spec)
                     ! query s when s.scope != 0
                         |> std/io:print.ln("after apply — scope {{ s.scope:d }} th {{ s.th:d }} held {{ world.held:d }}")
             |> if (world.frame == 60)
-                | then |> libs/metal:window.snap(path: "/tmp/theme_preview_b.bmp")
+                | then |> libs/canvas:window.snap(path: "/tmp/theme_preview_b.bmp")
             |> if (world.frame == 75)
-                | then |> libs/metal:quit()
+                | then |> libs/canvas:quit()
             // eff: doc-order sweep — parents precede children in
             // insertion order, so spec[s.parent].eff is already live.
             // th != 0 wins; else inherit; roots fall back to dft.
@@ -186,10 +186,10 @@ libs/clay:init(width: 640, height: 400)
                 | solved cls |> libs/clay:each(cl: cls)
                     ! cmd rc |> if (rc.kind == 1)
                         | then |> std/store:insert(hit) { seq: rc.ud - 1, tool: if (rc.ud == 0) 1 else 0, rc.x, rc.y, rc.w, rc.h }
-                            |> libs/metal:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
+                            |> libs/canvas:draw.rect(f, x: @round(rc.x), y: @round(rc.y), w: @round(rc.x + rc.w) - @round(rc.x), h: @round(rc.y + rc.h) - @round(rc.y), rc.r, rc.g, rc.b, rc.a)
                     ! cmd rc |> if (rc.kind == 3)
                         | then |> std/store:insert(hit) { seq: rc.ud - 1, tool: if (rc.ud == 0) 1 else 0, rc.x, rc.y, rc.w, rc.h }
-                            |> libs/metal:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
+                            |> libs/canvas:draw.text(f, x: @round(rc.x), y: @round(rc.y), size: rc.fs, rc.r, rc.g, rc.b, rc.a, text: rc.tx)
                     | drained |> std/store:stored { world.drew: 1 }
         ! mouse-down e
             |> std/store:stored { world.sel: -1 }
@@ -230,8 +230,8 @@ libs/clay:init(width: 640, height: 400)
                 | then |> std/store:query(spec)
                     ! query { [row]p } when p.scope == 2 and p.th != world.held
                         |> std/store:stored { p.th: world.held }
-        ! key-down k when k.code == 53 |> libs/metal:quit()
-        ! close |> libs/metal:quit()
-        | done w2 |> libs/clay:drop(cl: h) |> libs/metal:window.close(win: w2) |> std/io:print.ln("theme_preview: closed")
+        ! key-down k when k.code == 53 |> libs/canvas:quit()
+        ! close |> libs/canvas:quit()
+        | done w2 |> libs/clay:drop(cl: h) |> libs/canvas:window.close(win: w2) |> std/io:print.ln("theme_preview: closed")
     | err e |> std/io:print.ln("metal init failed: {{ e:s }}")
 | err e2 |> std/io:print.ln("clay init failed: {{ e2:s }}")

@@ -1,0 +1,26 @@
+{
+  "name": "@korulang/canvas",
+  "version": "0.0.1",
+  "description": "Canvas — the 2D window/draw contract for Koru: phantom window lifecycle, frame-loop-as-effect-branch, platform-selected backends (Metal+AppKit on macOS, software rasterizer on koru-native)",
+  "keywords": ["koru", "korulang", "canvas", "window", "phantom-types", "metal", "appkit", "macos", "koru-native"],
+  "author": "Koru Contributors",
+  "license": "MIT",
+  "homepage": "https://korulang.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/korulang/oshun.git",
+    "directory": "canvas"
+  },
+  "bugs": {
+    "url": "https://github.com/korulang/oshun/issues"
+  },
+  "files": [
+    "index.kz",
+    "index.macos.kz",
+    "index.koru-native.kz",
+    "NOTICE"
+  ],
+  "koru": {
+    "entry": "index.kz"
+  }
+}

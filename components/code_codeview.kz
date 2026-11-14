@@ -14,7 +14,7 @@
 //   f      — the live frame borrow (draw calls hang off it)
 //   slot   — the custody-plane slot file-open minted; res-doc-each
 //            and res-path read it
-//   face   — a mono font handle: libs/metal:font.load in a windowed
+//   face   — a mono font handle: libs/canvas:font.load in a windowed
 //            host, code-font on a headless surface
 //   scroll — scroll offset in LINE units; fractional drifts smoothly
 //   t      — entry progress 0..1; the caller drives it, lines rise
@@ -29,7 +29,7 @@
 // handles draw.textface consumes — the numbers are the renderer's,
 // never assumed metrics.
 
-~import libs/metal
+~import libs/canvas
 ~import app/omni_img
 
 const std = @import("std");
@@ -66,7 +66,7 @@ const R = @import("root").koru_app.koru_omni_img;
 // The shaped width of `text` — text.offset's surface-side twin. The
 // frame's TextSystem shapes it, so a span lands where the renderer
 // will put it.
-~[retain]pub tor code-measure { f: *libs/metal:Frame<frame>, text: string, size: f64, face: i64 } -> f64
+~[retain]pub tor code-measure { f: *libs/canvas:Frame<frame>, text: string, size: f64, face: i64 } -> f64
 
 ~proc code-measure|zig {
     return @floatCast(f.text.layout(text, face, @floatCast(size)).width);
@@ -74,7 +74,7 @@ const R = @import("root").koru_app.koru_omni_img;
 
 // The measured line box — ascent + descent at this size and face,
 // padded to the code rhythm. Baselines are derived, never guessed.
-~[retain]pub tor code-lineh { f: *libs/metal:Frame<frame>, size: f64, face: i64 } -> f64
+~[retain]pub tor code-lineh { f: *libs/canvas:Frame<frame>, size: f64, face: i64 } -> f64
 
 ~proc code-lineh|zig {
     const ft = f.text.font(face, @floatCast(size));
@@ -157,7 +157,7 @@ fn codeIsPunct(c: u8) bool {
 // keyword; runs of punctuation are sigils; everything else is plain.
 // Whitespace fires nothing — gaps are just air between spans.
 ~[retain]pub tor code-spans {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     text: string, size: f64, face: i64,
 }
 ! span CodeSpan
@@ -209,7 +209,7 @@ fn codeIsPunct(c: u8) bool {
 // scroll rail. `e` is the eased entry — the card rises 14pt and fades
 // in, and each line staggers behind it by 0.03 of the progress.
 ~pub tor codeview {
-    f: *libs/metal:Frame<frame>,
+    f: *libs/canvas:Frame<frame>,
     slot: i64, face: i64,
     x: f64, y: f64, w: f64, h: f64,
     scroll: f64, t: f64, a: f64,
@@ -220,32 +220,32 @@ fn codeIsPunct(c: u8) bool {
     |> code-measure(f, text: "88", size: 11.0, face) : gw
     |> app/omni_img:res-doc-n(slot) : n
     // floor shadow — the card floats over the room's silk
-    |> libs/metal:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
+    |> libs/canvas:draw.shadow(f, x: x + 4.0, y: y + (1.0 - e) * 14.0 + 12.0, w, h, radius: 16.0, blur: 22.0, r: 0.14, g: 0.10, b: 0.05, a: 0.42 * a * e)
     // ink body — the dark silk pane the material puts code on
-    |> libs/metal:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * e)
+    |> libs/canvas:draw.roundrect(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.14, g: 0.11, b: 0.09, a: 0.97 * a * e)
     // champagne hairline around the body
-    |> libs/metal:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
+    |> libs/canvas:draw.panel(f, x, y: y + (1.0 - e) * 14.0, w, h, radius: 14.0, r: 0.0, g: 0.0, b: 0.0, a: 0.0, bw: 1.0, br: 0.95, bg: 0.85, bb: 0.45, ba: 0.32 * a * e)
     // header — the file's own basename left, its line count right
     |> app/omni_img:res-path(slot) : pth
     |> code-path-tail(path: pth) : ttl
-    |> libs/metal:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
+    |> libs/canvas:draw.textface(f, x: x + 16.0, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.93, g: 0.83, b: 0.60, a: 0.85 * a * e, text: ttl)
     |> code-say-lines(n) : nt
     |> code-measure(f, text: nt, size: 11.0, face) : nw
-    |> libs/metal:draw.textface(f, x: x + w - 16.0 - nw, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: nt)
+    |> libs/canvas:draw.textface(f, x: x + w - 16.0 - nw, y: y + (1.0 - e) * 14.0 + 10.0, size: 11.0, font: face, r: 0.62, g: 0.55, b: 0.42, a: 0.80 * a * e, text: nt)
     // the header rule and the gutter rule — champagne hairlines
-    |> libs/metal:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
-    |> libs/metal:draw.rect(f, x: x + 16.0 + gw + 10.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
+    |> libs/canvas:draw.rect(f, x: x + 1.0, y: y + (1.0 - e) * 14.0 + 34.0, w: w - 2.0, h: 1.0, r: 0.95, g: 0.85, b: 0.45, a: 0.16 * a * e)
+    |> libs/canvas:draw.rect(f, x: x + 16.0 + gw + 10.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 1.0, h: h - 46.0, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
     // the code — clipped to the body below the header; a resource with
     // zero decoded lines says so in its empty state, inventing no text
-    |> libs/metal:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
+    |> libs/canvas:draw.clip.push(f, x: x + 1.0, y: y + 34.0, w: w - 2.0, h: h - 35.0)
     |> app/omni_img:res-doc-each(slot)
         ! row l |> code-tag(n: l.i + 1) : tag
             |> code-measure(f, text: tag, size: 11.0, face) : tw
             // the gutter number — right-aligned on the measured width
-            |> libs/metal:draw.textface(f, x: x + 16.0 + gw - tw, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 11.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6)) * 0.9, text: tag)
+            |> libs/canvas:draw.textface(f, x: x + 16.0 + gw - tw, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 11.0, font: face, r: 0.56, g: 0.49, b: 0.38, a: a * @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6)) * 0.9, text: tag)
             // the line's own spans — tokenizer kinds mapped to the palette
             |> code-spans(f, l.text, size: 13.0, face)
-                ! span sp |> libs/metal:draw.textface(f, x: x + 16.0 + gw + 22.0 + sp.dx, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 13.0, font: face,
+                ! span sp |> libs/canvas:draw.textface(f, x: x + 16.0 + gw + 22.0 + sp.dx, y: y + (1.0 - e) * 14.0 + 44.0 + (@as(f64, @floatFromInt(l.i)) - scroll) * lh + (1.0 - @min(1.0, @max(0.0, (e - @as(f64, @floatFromInt(l.i)) * 0.03) * 1.6))) * 9.0, size: 13.0, font: face,
                     r: if (sp.kind == 1) @as(f64, 0.50) else if (sp.kind == 2) @as(f64, 0.93) else if (sp.kind == 3) @as(f64, 0.90) else if (sp.kind == 4) @as(f64, 0.98) else if (sp.kind == 5) @as(f64, 0.72) else 0.90,
                     g: if (sp.kind == 1) @as(f64, 0.45) else if (sp.kind == 2) @as(f64, 0.62) else if (sp.kind == 3) @as(f64, 0.82) else if (sp.kind == 4) @as(f64, 0.80) else if (sp.kind == 5) @as(f64, 0.67) else 0.85,
                     b: if (sp.kind == 1) @as(f64, 0.36) else if (sp.kind == 2) @as(f64, 0.50) else if (sp.kind == 3) @as(f64, 0.52) else if (sp.kind == 4) @as(f64, 0.46) else if (sp.kind == 5) @as(f64, 0.55) else 0.76,
@@ -253,9 +253,9 @@ fn codeIsPunct(c: u8) bool {
                 | drained |> _
         | drained |> if (n == 0)
             | then |> code-measure(f, text: "no readable source lines", size: 12.0, face) : ew
-                |> libs/metal:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - e) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * e, text: "no readable source lines")
-    |> libs/metal:draw.clip.pop(f)
+                |> libs/canvas:draw.textface(f, x: x + w / 2.0 - ew / 2.0, y: y + (1.0 - e) * 14.0 + 34.0 + (h - 34.0) / 2.0 - 6.0, size: 12.0, font: face, r: 0.75, g: 0.68, b: 0.52, a: 0.60 * a * e, text: "no readable source lines")
+    |> libs/canvas:draw.clip.pop(f)
     // the scroll rail + thumb — only while the file overflows the view
     |> if (@as(f64, @floatFromInt(n)) * lh > h - 46.0)
-        | then |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
-            |> libs/metal:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(n)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * e)
+        | then |> libs/canvas:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0, w: 3.0, h: h - 52.0, radius: 1.5, r: 0.95, g: 0.85, b: 0.45, a: 0.10 * a * e)
+            |> libs/canvas:draw.roundrect(f, x: x + w - 9.0, y: y + (1.0 - e) * 14.0 + 40.0 + scroll * lh / (@as(f64, @floatFromInt(n)) * lh - (h - 46.0)) * (h - 52.0 - (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh)), w: 3.0, h: (h - 52.0) * (h - 46.0) / (@as(f64, @floatFromInt(n)) * lh), radius: 1.5, r: 0.95, g: 0.82, b: 0.45, a: 0.40 * a * e)

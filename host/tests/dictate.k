@@ -14,12 +14,12 @@
 //   koruc run host/tests/dictate.k
 
 import libs/host
-import libs/metal
+import libs/canvas
 import libs/needle
 import std/io
 import std/json
 
-libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle.cact")
+libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle.cact", keywords: "")
 | ready eng |> libs/host:mic.start()
     | live m |> libs/host:hotkey.watch(key: 47, mods: 6144)
         | watching hk1 |> libs/host:hotkey.watch(key: 12, mods: 6144)
@@ -28,15 +28,15 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
                     |> libs/host:mic.read(mic: m, max: 480000)
                         | ok stale |> std/io:free(content: stale)
                         | empty
-                    |> libs/metal:window.overlay(width: 360, height: 72, radius: 20.0)
-                        | win ov |> libs/metal:window.show(win: ov)
-                            |> libs/metal:window.clear.color(win: ov, r: 0.07, g: 0.06, b: 0.11)
-                            |> libs/metal:frames(win: ov, count: 9999999)
+                    |> libs/canvas:window.overlay(width: 360, height: 72, radius: 20.0)
+                        | win ov |> libs/canvas:window.show(win: ov)
+                            |> libs/canvas:window.clear.color(win: ov, r: 0.07, g: 0.06, b: 0.11)
+                            |> libs/canvas:frames(win: ov, count: 9999999)
                                 ! frame f
                                     |> libs/host:mic.level(mic: m, window: 800) : lv
-                                    |> libs/metal:draw.rect(f, x: 20.0, y: 26.0, w: lv * 4000.0, h: 20.0, r: 0.4, g: 0.9, b: 0.5, a: 1.0)
+                                    |> libs/canvas:draw.rect(f, x: 20.0, y: 26.0, w: lv * 4000.0, h: 20.0, r: 0.4, g: 0.9, b: 0.5, a: 1.0)
                                 ! hotkey h2 when h2.key == 47 and h2.down == 0
-                                    |> libs/metal:window.hide(win: ov)
+                                    |> libs/canvas:window.hide(win: ov)
                                 | done ov2 |> libs/host:mic.read(mic: m, max: 480000)
                                     | ok pcm |> libs/needle:transcribe(eng, pcm, language: "en")
                                         | ok json |> std/io:print.ln("result: {{ json:s }}")
@@ -55,7 +55,7 @@ libs/needle:load(path: "/Users/larsde/.cache/cactus-needle/whistle/2.0.0/whistle
                                         | err e |> std/io:print.ln("transcribe err: {{ e:s }}")
                                             |> std/io:free(content: pcm)
                                     | empty
-                                    |> libs/metal:window.close(win: ov2)
+                                    |> libs/canvas:window.close(win: ov2)
                         | err e |> std/io:print.ln("overlay err: {{ e:s }}")
                 ! hotkey h when h.key == 12 and h.down == 1
                     |> libs/host:quit()

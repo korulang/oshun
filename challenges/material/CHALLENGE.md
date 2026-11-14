@@ -2,8 +2,8 @@
 challenge: material
 kind: generator
 status: standing
-yields: one new GPU material — a shader-backed draw verb in libs/metal plus a demo that shows it on instanced quads
-catalog: ../../metal/tests/mat_*.k
+yields: one new GPU material — a shader-backed draw verb in libs/canvas plus a demo that shows it on instanced quads
+catalog: ../../canvas/tests/mat_*.k
 family: surface
 created: 2026-10-23
 ---
@@ -36,7 +36,7 @@ that exists only because the shader dodged its hard part.
   kernels, optics, refraction. The obvious sibling to silk (and its CPU
   twin pattern is the discipline to copy: same pixels, two paths).
 - mygo `ui/shader` + `internal/gpu/metal` — per-platform shader packaging.
-- The silk itself: `metal/index.kz` kind-4 — read how `silk_field`, the
+- The silk itself: `canvas/index.kz` kind-4 — read how `silk_field`, the
   normal-from-field lobes, `ftime` breathing, and the instanced uniform
   layout work before writing a second kind.
 
@@ -52,7 +52,7 @@ Asking negates the design. Lars judges after you ship.
 
 **Required:**
 
-1. A **new instanced kind** (kind 5, 6, …) in `metal/index.kz`'s shader +
+1. A **new instanced kind** (kind 5, 6, …) in `canvas/index.kz`'s shader +
    a `draw.<name>` verb that records it — same uniform/instance plumbing
    the silk rides.
 2. The material **behaves** — it has a physical property the eye can test:
@@ -69,9 +69,9 @@ constants; a "material" that is a static texture lookup with no field.
 
 ## Ship shape (zero-friction)
 
-- **Shader + verb:** in `metal/index.kz` — new kind branch in the fragment
+- **Shader + verb:** in `canvas/index.kz` — new kind branch in the fragment
   shader, new `draw.<name>` proc, kind-registry comment updated.
-- **Demo:** `metal/tests/mat_<name>.k` — window demo, grid of parameter
+- **Demo:** `canvas/tests/mat_<name>.k` — window demo, grid of parameter
   variation, compiles via koruc.
 - **Catalog:** one line in `challenges/material/CATALOG.md` under Replays.
 
@@ -91,7 +91,7 @@ uniform layout fights back — float the exact failure, pin a repro, stop.
 
 ## Self-ground — never invent
 
-- The silk: `/Users/larsde/src/oshun/metal/index.kz` (kind-4 shader, uniform
+- The silk: `/Users/larsde/src/oshun/canvas/index.kz` (kind-4 shader, uniform
   layout, `draw.silk` plumbing)
 - Koru law: `/Users/larsde/src/koru/tests/regression`
 - Reference: `/tmp/nanoui/src/ui/glass.metal`, `/tmp/mygo/ui/shader`

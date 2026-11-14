@@ -18,7 +18,7 @@ cards still read as ours. "Premium" survives on shadow, hairline
 borders, measured type, and motion — the pieces that were doing the
 work anyway.
 
-The shader body is preserved in git history (pre-f566041, metal/index.kz
+The shader body is preserved in git history (pre-f566041, canvas/index.kz
 kind-4 branch + silk_field/silk_pal helpers) should a band-limited
 resurrection be wanted — the honest fix would be fwidth-based fade of
 the hue fringe, not constant reduction. Glass (kind 5) and frost

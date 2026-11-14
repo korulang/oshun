@@ -11,11 +11,11 @@
 //
 // Ink comes from std/ctx(theme): ir/ig/ib.
 
-~import libs/metal
+~import libs/canvas
 
 ~pub tor lens {
-    win: *libs/metal:Window<opened|active>,
-    f: *libs/metal:Frame<frame>,
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>,
     tex: i64,
     cx: f64, cy: f64, w: f64, h: f64,
     bx: f64, by: f64, bw: f64, bh: f64,
@@ -25,7 +25,7 @@
     li: f64, lg: f64, lb: f64,
 }
 
-~lens = libs/metal:draw.glass(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, tex, bx, by, bw, bh, bezel: 14.0, refract: 16.0, rim: 6.0, aberr: 0.3, r: tr, g: tg, b: tb, a: ta)
+~lens = libs/canvas:draw.glass(f, x: cx - w * 0.5, y: cy - h * 0.5, w, h, radius: rad, tex, bx, by, bw, bh, bezel: 14.0, refract: 16.0, rim: 6.0, aberr: 0.3, r: tr, g: tg, b: tb, a: ta)
     // label — measured center, optical middle
-    |> libs/metal:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
-        |> libs/metal:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)
+    |> libs/canvas:text.offset(win, text: label, size: 18.0, face, index: @as(i64, @intCast(label.len))) : tw
+        |> libs/canvas:draw.textface(f, x: cx - tw / 2.0, y: cy - 10.5, size: 18.0, font: face, r: li, g: lg, b: lb, a: a * 0.95, text: label)

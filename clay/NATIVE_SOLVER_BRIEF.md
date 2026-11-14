@@ -483,7 +483,7 @@ frame-1 stream as canonical.
 ## 1. The question
 
 koru-libs renders UI through vendored Clay v0.14 (`clay.h`, 5,058 lines,
-652 internals) for layout. Nanoui — the Zig framework metal/index.kz
+652 internals) for layout. Nanoui — the Zig framework canvas/index.kz
 already ports glyphs/atlas/instancing from — solves the same workload
 with a purpose-built 318-line flexbox (`src/ui/layout.zig`). Its solve
 (0.015) is ~2.2× faster than Clay's EndLayout (0.033), and its
@@ -539,7 +539,7 @@ retained. Koru side: `std/benchmarking:climb` + `lap` (koru main
   synchronisation (wait on the slot's last command buffer before reuse) is
   correct by construction but not test-gated: a static scene can't expose
   a race.
-- The paint path is gated: `metal/tests/offscreen_scene.k` (offscreen
+- The paint path is gated: `canvas/tests/offscreen_scene.k` (offscreen
   surface) and `offscreen_twin.k` (same scene through a window) produce
   byte-identical 1280×800 BMPs. A +1/255 colour mutation makes `cmp`
   fail. The window path's `snap.k` is byte-identical before and after the
@@ -603,11 +603,11 @@ spec store (retained rows, stable handles, [tree] parent stamps)
   → expansion pass (queries spec, emits element decls each frame)
   → Clay: BeginLayout → open/cfg/close × N → EndLayout → render commands
   → CmdView drain (kind, x/y/w/h, rgba, img, ud=eid, tx, fs)
-  → metal/index.kz draw ops → instance stream → GPU
+  → canvas/index.kz draw ops → instance stream → GPU
 ```
 
 Per frame today: everything runs, unconditionally, ~60fps polling pump
-(`frames|zig` in metal/index.kz: pump events → dispatch → `! frame` →
+(`frames|zig` in canvas/index.kz: pump events → dispatch → `! frame` →
 sleep 16ms). Nothing is skipped; nothing is cached across frames except
 metal's glyph/text caches.
 
@@ -755,7 +755,7 @@ Known traps, ranked:
 | `clay/tests/spec_snap.k`, `spec_tree.k` | pixel oracles (byte-identical BMP requirement) |
 | `clay/tests/spec_snap_nl.k` | consumer-path pixel oracle: spec_snap twin through nl (byte-identical BMP vs spec_snap) |
 | `clay/tests/bench_scene.k` | scene bench: real ui scene (spec_bench store+rows), interleaved clay/nl, climb laps |
-| `metal/index.kz` | draw ops, instance format (kind 0 quad/1 text/2 shadow/3 image), `frames|zig` pump |
+| `canvas/index.kz` | draw ops, instance format (kind 0 quad/1 text/2 shadow/3 image), `frames|zig` pump |
 | nanoui clone `/tmp/nanoui-check` | `hillclimb/` harness (may need re-clone — /tmp is scratch); `src/ui/layout.zig` = the 318-line reference |
 
 Repro: `cd /tmp/nanoui-check/hillclimb && zig build run -- --scene boxes
