@@ -1,0 +1,6 @@
+name: defect-found
+kind: declared
+shape: categorical
+face: in
+membrane: false
+note: a verification path that reported success while the artifact it claimed to verify was never actually observed — refine with the oracle that would have caught it
