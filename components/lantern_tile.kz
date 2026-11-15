@@ -2,9 +2,13 @@
 //
 // The lantern anatomy — label row, hero figure, caption, landscape — carried
 // into three control-family tiles: vitals (dot matrix), flight (progress
-// runway), dial (tick gauge). One shared chrome tor; no control flow inside
-// the draw chains (a Koru `for`/`if` is terminal in a tor), so the loops are
-// unrolled and the dial's lit arc is arithmetic alpha.
+// runway), dial (tick gauge). One shared chrome tor.
+//
+// The flight and dial ticks use `for(..) ! each .. | done |> ..` — `done` is
+// the loop's continuation, so the chain resumes after it. (Pinned by koru
+// regression 320_184; a bare `|>` after the loop is the user error, not a
+// language wall.) The vitals envelope is a hand-tuned 21-step table, left
+// unrolled on purpose.
 //
 // It follows the lantern numbers (rough/VISUAL_LANGUAGE.md in omni): ink
 // #080705, pane #100E0B, champagne #E8CFA0 at varying intensity, no inner
@@ -126,12 +130,18 @@
 ~flight-landscape = libs/canvas:draw.roundrect(f, x, y: y + h * 0.30, w, h: 8.0, radius: 4.0, r: 0.18, g: 0.15, b: 0.11, a: 0.95)
     |> libs/canvas:draw.roundrect(f, x, y: y + h * 0.30, w: w * value, h: 8.0, radius: 4.0, r: 0.88, g: 0.80, b: 0.62, a: 0.92)
     |> libs/canvas:draw.roundrect(f, x: x + w * value - 18.0, y: y + h * 0.30 - 6.0, w: 36.0, h: 20.0, radius: 10.0, r: 0.98, g: 0.93, b: 0.80, a: 0.24)
-    |> libs/canvas:draw.rect(f, x: x + w * 0.000000, y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
-    |> libs/canvas:draw.rect(f, x: x + w * 0.250000, y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
-    |> libs/canvas:draw.rect(f, x: x + w * 0.500000, y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
-    |> libs/canvas:draw.rect(f, x: x + w * 0.750000, y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
-    |> libs/canvas:draw.rect(f, x: x + w * 1.000000, y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
-    |> libs/canvas:draw.roundrect(f, x: x + w * value - 10.0, y: y + h * 0.30 - 10.0, w: 20.0, h: 20.0, radius: 10.0, r: 0.98, g: 0.93, b: 0.80, a: 0.14)
+    |> for(0..@as(usize, 5))
+        ! each ti
+            |> libs/canvas:draw.rect(f, x: x + w * (@as(f64, @floatFromInt(ti)) / 4.0), y: y + h * 0.22, w: 1.0, h: 8.0, r: 0.62, g: 0.55, b: 0.42, a: 0.45)
+        | done |> flight-marker(win, f, face, x, y, w, h, value)
+
+~pub tor flight-marker {
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>, face: i64,
+    x: f64, y: f64, w: f64, h: f64, value: f64,
+}
+
+~flight-marker = libs/canvas:draw.roundrect(f, x: x + w * value - 10.0, y: y + h * 0.30 - 10.0, w: 20.0, h: 20.0, radius: 10.0, r: 0.98, g: 0.93, b: 0.80, a: 0.14)
     |> libs/canvas:draw.textface(f, x: x + w * value - 9.0, y: y + h * 0.30 - 11.0, size: @max(16.0, w * 0.05), font: face, r: 0.99, g: 0.97, b: 0.91, a: 1.0, text: "✈")
     |> libs/canvas:draw.textface(f, x, y: y + h * 0.52, size: @max(8.0, w * 0.026), font: face, r: 0.62, g: 0.57, b: 0.47, a: 0.92, text: "SFO")
     |> libs/canvas:text.offset(win, text: "YEG", size: @max(8.0, w * 0.026), face, index: 3) : yw
@@ -157,47 +167,20 @@
 }
 
 ~dial-landscape = libs/canvas:draw.roundrect(f, x: x - r - 10.0, y: y - r - 10.0, w: (r + 10.0) * 2.0, h: (r + 10.0) * 2.0, radius: r + 10.0, r: 0.96, g: 0.89, b: 0.74, a: 0.035)
-    |> libs/canvas:draw.roundrect(f, x: x + -0.707107 * r - 2.0, y: y + 0.707107 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.000000) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.787183 * r - 2.0, y: y + 0.616719 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.025641) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.855781 * r - 2.0, y: y + 0.517338 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.051282) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.911900 * r - 2.0, y: y + 0.410413 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.076923) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.954721 * r - 2.0, y: y + 0.297503 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.102564) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.983620 * r - 2.0, y: y + 0.180255 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.128205) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.998176 * r - 2.0, y: y + 0.060378 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.153846) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.998176 * r - 2.0, y: y + -0.060378 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.179487) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.983620 * r - 2.0, y: y + -0.180255 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.205128) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.954721 * r - 2.0, y: y + -0.297503 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.230769) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.911900 * r - 2.0, y: y + -0.410413 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.256410) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.855781 * r - 2.0, y: y + -0.517338 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.282051) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.787183 * r - 2.0, y: y + -0.616719 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.307692) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.707107 * r - 2.0, y: y + -0.707107 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.333333) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.616719 * r - 2.0, y: y + -0.787183 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.358974) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.517338 * r - 2.0, y: y + -0.855781 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.384615) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.410413 * r - 2.0, y: y + -0.911900 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.410256) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.297503 * r - 2.0, y: y + -0.954721 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.435897) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.180255 * r - 2.0, y: y + -0.983620 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.461538) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + -0.060378 * r - 2.0, y: y + -0.998176 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.487179) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.060378 * r - 2.0, y: y + -0.998176 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.512821) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.180255 * r - 2.0, y: y + -0.983620 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.538462) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.297503 * r - 2.0, y: y + -0.954721 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.564103) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.410413 * r - 2.0, y: y + -0.911900 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.589744) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.517338 * r - 2.0, y: y + -0.855781 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.615385) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.616719 * r - 2.0, y: y + -0.787183 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.641026) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.707107 * r - 2.0, y: y + -0.707107 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.666667) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.787183 * r - 2.0, y: y + -0.616719 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.692308) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.855781 * r - 2.0, y: y + -0.517338 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.717949) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.911900 * r - 2.0, y: y + -0.410413 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.743590) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.954721 * r - 2.0, y: y + -0.297503 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.769231) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.983620 * r - 2.0, y: y + -0.180255 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.794872) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.998176 * r - 2.0, y: y + -0.060378 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.820513) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.998176 * r - 2.0, y: y + 0.060378 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.846154) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.983620 * r - 2.0, y: y + 0.180255 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.871795) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.954721 * r - 2.0, y: y + 0.297503 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.897436) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.911900 * r - 2.0, y: y + 0.410413 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.923077) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.855781 * r - 2.0, y: y + 0.517338 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.948718) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.787183 * r - 2.0, y: y + 0.616719 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 0.974359) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x + 0.707107 * r - 2.0, y: y + 0.707107 * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - 1.000000) * 14.0 + 0.055)))
-    |> libs/canvas:draw.roundrect(f, x: x - 5.0, y: y - 5.0, w: 10.0, h: 10.0, radius: 5.0, r: 0.99, g: 0.94, b: 0.82, a: 0.95)
+    |> for(0..@as(usize, 40))
+        ! each ti
+            |> libs/math:cos(x: 2.35619449 + (@as(f64, @floatFromInt(ti)) / 39.0) * 4.71238898) : ca
+            |> libs/math:sin(x: 2.35619449 + (@as(f64, @floatFromInt(ti)) / 39.0) * 4.71238898) : sa
+            |> libs/canvas:draw.roundrect(f, x: x + ca * r - 2.0, y: y + sa * r - 2.0, w: 4.0, h: 4.0, radius: 2.0, r: 0.98, g: 0.92, b: 0.78, a: @min(0.95, @max(0.055, (value - (@as(f64, @floatFromInt(ti)) / 39.0)) * 14.0 + 0.055)))
+        | done |> dial-center(win, f, face, x, y, r, value, hero, unit, caption)
+
+~pub tor dial-center {
+    win: *libs/canvas:Window<opened|active>,
+    f: *libs/canvas:Frame<frame>, face: i64,
+    x: f64, y: f64, r: f64, value: f64, hero: string, unit: string, caption: string,
+}
+
+~dial-center = libs/canvas:draw.roundrect(f, x: x - 5.0, y: y - 5.0, w: 10.0, h: 10.0, radius: 5.0, r: 0.99, g: 0.94, b: 0.82, a: 0.95)
     |> libs/math:cos(x: 2.35619449 + value * 4.71238898) : ica
     |> libs/math:sin(x: 2.35619449 + value * 4.71238898) : isa
     |> libs/canvas:draw.roundrect(f, x: x + ica * r - 7.0, y: y + isa * r - 7.0, w: 14.0, h: 14.0, radius: 7.0, r: 0.98, g: 0.90, b: 0.72, a: 0.25)
