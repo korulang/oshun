@@ -34,7 +34,7 @@
 ~import libs/canvas
 
 const std = @import("std");
-const M = @import("root").koru_libs.koru_metal;
+const M = @import("root").koru_libs.koru_canvas;
 
 // ============================================================================
 // The row table — parsed at diff-load, streamed by diff-each

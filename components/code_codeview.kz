@@ -33,7 +33,7 @@
 ~import app/omni_img
 
 const std = @import("std");
-const M = @import("root").koru_libs.koru_metal;
+const M = @import("root").koru_libs.koru_canvas;
 const R = @import("root").koru_app.koru_omni_img;
 
 // Ease-out cubic on a clamped 0..1 progress — the entry motion's curve.

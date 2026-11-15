@@ -25,7 +25,7 @@
 ~import libs/vt
 
 const std = @import("std");
-const M = @import("root").koru_libs.koru_metal;
+const M = @import("root").koru_libs.koru_canvas;
 
 // Ease-out cubic on a clamped 0..1 progress — the entry motion's curve.
 ~[retain]pub tor term-ease { t: f64 } -> f64

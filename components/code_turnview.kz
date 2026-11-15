@@ -48,7 +48,7 @@
 ~import std/json
 
 const std = @import("std");
-const M = @import("root").koru_libs.koru_metal;
+const M = @import("root").koru_libs.koru_canvas;
 
 // font.load's offscreen twin — the window param it takes is ignored by
 // the proc, so the job is identical: CGDataProvider + CGFont appended
