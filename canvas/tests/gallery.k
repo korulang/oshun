@@ -208,6 +208,12 @@ oshun:component(seed, spec) {
                     |> if (world.frame == 1)
                         | then |> std/store:insert(entries) { tx: "flow", sub: "draw.bezier — stroked quadratic curves", tork: 11 }
                             | row h0 |> std/store:stored { world.sel: h0 }
+                            |> std/store:insert(entries) { tx: "vitals", sub: "82 mmhg — dot-matrix pulse", tork: 15 }
+                                | row lv |> std/store:stored { world.l0: lv }
+                            |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — progress runway", tork: 16 }
+                                | row lf |> std/store:stored { world.l1: lf }
+                            |> std/store:insert(entries) { tx: "dial", sub: "rotary control — tick gauge", tork: 17 }
+                                | row ld |> std/store:stored { world.l2: ld }
                             |> std/store:insert(entries) { tx: "dome", sub: "neumorphism × glass — soft chrome", tork: 12 }
                                 | row _
                             |> std/store:insert(entries) { tx: "glass", sub: "cover-fit photo + frost pane — the minimum", tork: 13 }
@@ -235,12 +241,6 @@ oshun:component(seed, spec) {
                                 | row _
                             |> std/store:insert(entries) { tx: "term", sub: "ghostty-vt — a live session in a card", tork: 10 }
                                 | row ts |> std/store:stored { world.termsel: ts }
-                            |> std/store:insert(entries) { tx: "vitals", sub: "82 mmhg — dot-matrix pulse", tork: 15 }
-                                | row lv |> std/store:stored { world.l0: lv }
-                            |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — progress runway", tork: 16 }
-                                | row lf |> std/store:stored { world.l1: lf }
-                            |> std/store:insert(entries) { tx: "dial", sub: "rotary control — tick gauge", tork: 17 }
-                                | row ld |> std/store:stored { world.l2: ld }
                     // Locate the two minted slots by kind — audio kind 2,
                     // doc kind 0; the handles already came back from
                     // file-open, slots derive from the res arrays.
