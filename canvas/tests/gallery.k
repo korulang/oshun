@@ -13,7 +13,7 @@
 //   entries.tork dispatches post-emit: 0 hub, 1 button, 2 caption,
 //   3 wordmark, 4 remote, 5 waveform, 6 docpage, 7 codeview, 8 diffview,
 //   9 turnview, 10 term, 11 flow, 12 dome, 13 glass, 14 avatar,
-//   15 vitals, 16 flight, 17 dial (lantern control family). Landing a new catalog
+//   15 bp, 16 flight (reference-faithful ports). Landing a new catalog
 //   entry = one insert row + one dispatch arm + one CATALOG.md line.
 //
 // Resource-kind components (waveform/docpage) draw real minted
@@ -22,8 +22,8 @@
 // bridge apps use, no stubs.
 //
 // Scripted twin: input drivers select entries on fixed frames, window
-// snaps at each pick, quits at 135 (the lantern control family is the last
-// trio). `live` arg holds the window.
+// snaps at each pick, quits at 130 (the two reference-faithful ports are
+// the last entries). `live` arg holds the window.
 //
 //   KORU_COMPILE_MEM_MB=20480 koruc run canvas/tests/gallery.k
 //
@@ -41,7 +41,7 @@ import libs/components/dome
 import libs/components/glasscard
 import libs/components/lens
 import libs/components/avatar
-import libs/components/lantern_tile
+import libs/components/reference_widgets
 import libs/math
 import libs/vt
 import app/omni_img
@@ -63,7 +63,7 @@ std/store:new(world) {
     tex: -1[i64], gtex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
     fu: -1[i64], psel: -1[i64], dive: 0[i64], coghot: 0[i64],
     mood: 0[i64], atork: -1[i64],
-    l0: -1[i64], l1: -1[i64], l2: -1[i64],
+    l0: -1[i64], l1: -1[i64],
     v0: -1[i64], v1: -1[i64], v2: -1[i64], v3: -1[i64],
 }
 std/store:new(fworld) {
@@ -208,12 +208,10 @@ oshun:component(seed, spec) {
                     |> if (world.frame == 1)
                         | then |> std/store:insert(entries) { tx: "flow", sub: "draw.bezier — stroked quadratic curves", tork: 11 }
                             | row h0 |> std/store:stored { world.sel: h0 }
-                            |> std/store:insert(entries) { tx: "vitals", sub: "82 mmhg — dot-matrix pulse", tork: 15 }
+                            |> std/store:insert(entries) { tx: "bp", sub: "82 mmhg — reference port 394x210", tork: 15 }
                                 | row lv |> std/store:stored { world.l0: lv }
-                            |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — progress runway", tork: 16 }
+                            |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — reference port 400x155", tork: 16 }
                                 | row lf |> std/store:stored { world.l1: lf }
-                            |> std/store:insert(entries) { tx: "dial", sub: "rotary control — tick gauge", tork: 17 }
-                                | row ld |> std/store:stored { world.l2: ld }
                             |> std/store:insert(entries) { tx: "dome", sub: "neumorphism × glass — soft chrome", tork: 12 }
                                 | row _
                             |> std/store:insert(entries) { tx: "glass", sub: "cover-fit photo + frost pane — the minimum", tork: 13 }
@@ -478,11 +476,9 @@ oshun:component(seed, spec) {
                                     |> libs/canvas:text.offset(win: w, text: "determined", size: 13.0, world.face, index: 10) : pw3
                                         |> libs/canvas:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0 + (92.0 - pw3) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "determined")
                             |> if (se.tork == 15)
-                                | then |> libs/components/lantern_tile:lantern-vitals(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "vitals", chip: "resting", hero: "82", unit: "mmhg", caption: "5 min interval . systolic")
+                                | then |> libs/components/reference_widgets:reference-bp(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 295.5, y: fworld.sy0 + 96.0, s: 1.5)
                             |> if (se.tork == 16)
-                                | then |> libs/components/lantern_tile:lantern-flight(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "arrival", chip: "on time", hero: "12:59", unit: "AM", caption: "20 min out . gate B12", value: 0.72)
-                            |> if (se.tork == 17)
-                                | then |> libs/components/lantern_tile:lantern-dial(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "output", chip: "active", hero: "62", unit: "percent", caption: "rotary control . drag to turn", value: 0.62)
+                                | then |> libs/components/reference_widgets:reference-flight(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 140.0, s: 1.5)
                     // THE FLIGHT — the clicked row's pill travels to the
                     // header slot; its fill dissolves into bare text.
                     |> if (world.fu >= 0 and fworld.ft < 1.0)
@@ -541,16 +537,12 @@ oshun:component(seed, spec) {
                     |> if (world.frame == 118 and world.live == 0)
                         | then |> std/store:stored { world.sel: world.l0 }
                     |> if (world.frame == 120 and world.live == 0)
-                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_vitals.bmp")
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_bp.bmp")
                     |> if (world.frame == 124 and world.live == 0)
                         | then |> std/store:stored { world.sel: world.l1 }
                     |> if (world.frame == 126 and world.live == 0)
                         | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_flight.bmp")
                     |> if (world.frame == 130 and world.live == 0)
-                        | then |> std/store:stored { world.sel: world.l2 }
-                    |> if (world.frame == 132 and world.live == 0)
-                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_dial.bmp")
-                    |> if (world.frame == 135 and world.live == 0)
                         | then |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 0 |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 1
