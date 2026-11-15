@@ -43,10 +43,9 @@ UI subtree (canvas/clay/ui/solver) is inbound from koru-libs.
   `canvas/tests/commander.k` (the OMNI bridge app) needs
   `KORU_COMPILE_MEM_MB=8192`; the 4096MB default dies mid-pipeline
   (verified against HEAD, first hit by the visualizer-02 replay).
-  `canvas/tests/gallery.k` is bigger still — it refused at 8192 and
-  compiled clean at `KORU_COMPILE_MEM_MB=16384` (2026-11-07, with the
-  flow/bezier additions; whether it already needed >8GB before is
-  unmeasured).
+  `canvas/tests/gallery.k` is bigger still — it refused at 8192 and at
+  16384, and compiles clean at `KORU_COMPILE_MEM_MB=20480` (2026-11-15, with
+  the lantern control family; the old 16384 note was 2026-11-07).
 - **A compile is not a verification** — markup lowers to store seeds;
   wrong seeds compile fine. Check the seeded rows/pixels.
 - The transform emits `std.store` inserts — markup-only consumers pull

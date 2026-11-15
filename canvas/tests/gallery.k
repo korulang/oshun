@@ -22,7 +22,10 @@
 // bridge apps use, no stubs.
 //
 // Scripted twin: input drivers select entries on fixed frames, window
-// snaps at each pick, quits at 40. `live` arg holds the window.
+// snaps at each pick, quits at 135 (the lantern control family is the last
+// trio). `live` arg holds the window.
+//
+//   KORU_COMPILE_MEM_MB=20480 koruc run canvas/tests/gallery.k
 //
 import libs/canvas
 import libs/host
