@@ -170,8 +170,11 @@ const msl_src: [:0]const u8 =
     \\// a liquid-glass pane (kind 5 — bezel-lens refraction of the
     \\// image-atlas backdrop beneath it), a frosted-glass pane
     \\// (kind 6 — ground-glass scatter of the captured scene texture),
-    \\// or a stroked quadratic Bézier (kind 7 — uv/silk carry the three
-    \\// control points, border_width the stroke width).
+    \\// a stroked quadratic Bézier (kind 7 — uv/silk carry the three
+    \\// control points, border_width the stroke width), or a two-stop
+    \\// gradient fill (kind 8 linear — uv is start.xy,end.xy; kind 9
+    \\// radial — uv is center.xy,radius; color/border_color are the
+    \\// endpoints).
     \\// (Kind 4, the pearlescent silk drape, was retired — its hue
     \\// fringe banded on flat panels; flat fills carry the champagne.)
     \\// Each instance clips to its clip rect; clip corners may be rounded.
@@ -466,6 +469,27 @@ const msl_src: [:0]const u8 =
     \\        float cov = 1.0 - smoothstep(-aa, aa, sd);
     \\        return float4(i.color.rgb, i.color.a * cov) * clip_cover;
     \\    }
+    \\    if (i.kind == 8.0) {
+    \\        // Linear two-stop gradient. uv.xy = start, uv.zw = end in points.
+    \\        float2 a = i.uv.xy;
+    \\        float2 b = i.uv.zw;
+    \\        float2 ab = b - a;
+    \\        float t = clamp(dot(in.world - a, ab) / max(dot(ab, ab), 1e-5), 0.0, 1.0);
+    \\        float4 c = mix(i.color, i.border_color, t);
+    \\        float aa = max(fwidth(d), 0.0001) * 0.5;
+    \\        float cov = 1.0 - smoothstep(-aa, aa, d);
+    \\        return float4(c.rgb, c.a * cov) * clip_cover;
+    \\    }
+    \\    if (i.kind == 9.0) {
+    \\        // Radial two-stop gradient. uv.xy = center, uv.z = radius (points).
+    \\        float2 ctr = i.uv.xy;
+    \\        float rad = max(i.uv.z, 1e-5);
+    \\        float t = clamp(length(in.world - ctr) / rad, 0.0, 1.0);
+    \\        float4 c = mix(i.color, i.border_color, t);
+    \\        float aa = max(fwidth(d), 0.0001) * 0.5;
+    \\        float cov = 1.0 - smoothstep(-aa, aa, d);
+    \\        return float4(c.rgb, c.a * cov) * clip_cover;
+    \\    }
     \\    float aa = max(fwidth(d), 0.0001) * 0.5;
     \\    float coverage = 1.0 - smoothstep(-aa, aa, d);
     \\    float4 c = i.color;
@@ -523,6 +547,10 @@ const inst_image: f32 = 3;
 const inst_glass: f32 = 5;
 const inst_frost: f32 = 6;
 const inst_stroke: f32 = 7;
+const inst_gradient: f32 = 8;
+const inst_gradient_radial: f32 = 9;
+// NOTE: the native arm (index.koru-native.kz) does not implement kinds 8/9 yet.
+// A native consumer calling draw.gradient refuses at compile, not silently.
 
 // A clip rect as the shader reads it: x0,y0,x1,y1. An empty stack means the
 // huge unclipped rect — cheap in the fragment (four compares).
@@ -2433,6 +2461,45 @@ pub const Surface = struct {
         .radius = @floatCast(radius),
         .border_width = @floatCast(bw),
         .kind = inst_quad,
+        .clip_round = clipRound(f),
+        .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// A two-stop gradient fill, rounded like a quad. `x0,y0 -> x1,y1` is the
+// gradient axis in points; the colors are the two endpoints. The fragment
+// clamps the projection, so the axis may sit anywhere relative to the rect.
+~pub tor draw.gradient { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, x0: f64, y0: f64, x1: f64, y1: f64, r0: f64, g0: f64, b0: f64, a0: f64, r1: f64, g1: f64, b1: f64, a1: f64 }
+
+~proc draw.gradient|zig {
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r0), @floatCast(g0), @floatCast(b0), @floatCast(a0) },
+        .border_color = .{ @floatCast(r1), @floatCast(g1), @floatCast(b1), @floatCast(a1) },
+        .uv = .{ @floatCast(x0), @floatCast(y0), @floatCast(x1), @floatCast(y1) },
+        .clip = curClip(f),
+        .radius = @floatCast(radius),
+        .border_width = 0,
+        .kind = inst_gradient,
+        .clip_round = clipRound(f),
+        .silk = .{ 0, 0, 0, 0 },
+    });
+}
+
+// A two-stop radial gradient fill. `cx,cy,cr` is the center and outer
+// radius in points; the outer stop's alpha can be 0 for a soft vignette.
+~pub tor draw.gradient.radial { f: *Frame<frame>, x: f64, y: f64, w: f64, h: f64, radius: f64, cx: f64, cy: f64, cr: f64, r0: f64, g0: f64, b0: f64, a0: f64, r1: f64, g1: f64, b1: f64, a1: f64 }
+
+~proc draw.gradient.radial|zig {
+    instPush(f, .{
+        .rect = .{ @floatCast(x), @floatCast(y), @floatCast(w), @floatCast(h) },
+        .color = .{ @floatCast(r0), @floatCast(g0), @floatCast(b0), @floatCast(a0) },
+        .border_color = .{ @floatCast(r1), @floatCast(g1), @floatCast(b1), @floatCast(a1) },
+        .uv = .{ @floatCast(cx), @floatCast(cy), @floatCast(cr), 0 },
+        .clip = curClip(f),
+        .radius = @floatCast(radius),
+        .border_width = 0,
+        .kind = inst_gradient_radial,
         .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
