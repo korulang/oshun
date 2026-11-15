@@ -11,7 +11,9 @@
 //   view row kinds: panel, clip, text — the only vocabulary emit knows
 //
 //   entries.tork dispatches post-emit: 0 hub, 1 button, 2 caption,
-//   3 wordmark, 4 remote, 5 waveform, 6 docpage. Landing a new catalog
+//   3 wordmark, 4 remote, 5 waveform, 6 docpage, 7 codeview, 8 diffview,
+//   9 turnview, 10 term, 11 flow, 12 dome, 13 glass, 14 avatar,
+//   15 vitals, 16 flight, 17 dial (lantern control family). Landing a new catalog
 //   entry = one insert row + one dispatch arm + one CATALOG.md line.
 //
 // Resource-kind components (waveform/docpage) draw real minted
@@ -36,6 +38,7 @@ import libs/components/dome
 import libs/components/glasscard
 import libs/components/lens
 import libs/components/avatar
+import libs/components/lantern_tile
 import libs/math
 import libs/vt
 import app/omni_img
@@ -57,6 +60,7 @@ std/store:new(world) {
     tex: -1[i64], gtex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
     fu: -1[i64], psel: -1[i64], dive: 0[i64], coghot: 0[i64],
     mood: 0[i64], atork: -1[i64],
+    l0: -1[i64], l1: -1[i64], l2: -1[i64],
     v0: -1[i64], v1: -1[i64], v2: -1[i64], v3: -1[i64],
 }
 std/store:new(fworld) {
@@ -228,6 +232,12 @@ oshun:component(seed, spec) {
                                 | row _
                             |> std/store:insert(entries) { tx: "term", sub: "ghostty-vt — a live session in a card", tork: 10 }
                                 | row ts |> std/store:stored { world.termsel: ts }
+                            |> std/store:insert(entries) { tx: "vitals", sub: "82 mmhg — dot-matrix pulse", tork: 15 }
+                                | row lv |> std/store:stored { world.l0: lv }
+                            |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — progress runway", tork: 16 }
+                                | row lf |> std/store:stored { world.l1: lf }
+                            |> std/store:insert(entries) { tx: "dial", sub: "rotary control — tick gauge", tork: 17 }
+                                | row ld |> std/store:stored { world.l2: ld }
                     // Locate the two minted slots by kind — audio kind 2,
                     // doc kind 0; the handles already came back from
                     // file-open, slots derive from the res arrays.
@@ -464,6 +474,12 @@ oshun:component(seed, spec) {
                                         | then |> libs/canvas:draw.panel(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 94.0, w: 92.0, h: 32.0, radius: 16.0, r: 1.0, g: 1.0, b: 1.0, a: 0.0, bw: 1.5, br: theme.rr, bg: theme.rg, bb: theme.rb, ba: 0.9)
                                     |> libs/canvas:text.offset(win: w, text: "determined", size: 13.0, world.face, index: 10) : pw3
                                         |> libs/canvas:draw.textface(f, x: (fworld.sx0 + fworld.sx1) / 2.0 + 110.0 + (92.0 - pw3) / 2.0, y: (fworld.sy0 + fworld.sy1) / 2.0 + 103.5, size: 13.0, font: world.face, r: theme.ir, g: theme.ig, b: theme.ib, a: 0.95, text: "determined")
+                            |> if (se.tork == 15)
+                                | then |> libs/components/lantern_tile:lantern-vitals(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "vitals", chip: "resting", hero: "82", unit: "mmhg", caption: "5 min interval . systolic")
+                            |> if (se.tork == 16)
+                                | then |> libs/components/lantern_tile:lantern-flight(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "arrival", chip: "on time", hero: "12:59", unit: "AM", caption: "20 min out . gate B12", value: 0.72)
+                            |> if (se.tork == 17)
+                                | then |> libs/components/lantern_tile:lantern-dial(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 92.0, w: 600.0, h: 430.0, label: "output", chip: "active", hero: "62", unit: "percent", caption: "rotary control . drag to turn", value: 0.62)
                     // THE FLIGHT — the clicked row's pill travels to the
                     // header slot; its fill dissolves into bare text.
                     |> if (world.fu >= 0 and fworld.ft < 1.0)
@@ -518,7 +534,20 @@ oshun:component(seed, spec) {
                         | then |> libs/canvas:window.snap(path: "/tmp/gallery_flight.bmp")
                     |> if (world.frame == 112 and world.live == 0)
                         | then |> libs/canvas:window.snap(path: "/tmp/gallery_landed.bmp")
-                    |> if (world.frame == 115 and world.live == 0)
+                    // the lantern control family — select by handle and snap
+                    |> if (world.frame == 118 and world.live == 0)
+                        | then |> std/store:stored { world.sel: world.l0 }
+                    |> if (world.frame == 120 and world.live == 0)
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_vitals.bmp")
+                    |> if (world.frame == 124 and world.live == 0)
+                        | then |> std/store:stored { world.sel: world.l1 }
+                    |> if (world.frame == 126 and world.live == 0)
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_flight.bmp")
+                    |> if (world.frame == 130 and world.live == 0)
+                        | then |> std/store:stored { world.sel: world.l2 }
+                    |> if (world.frame == 132 and world.live == 0)
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_widget_dial.bmp")
+                    |> if (world.frame == 135 and world.live == 0)
                         | then |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 0 |> libs/host:quit()
                 ! key-down k when k.code == 53 and world.dive == 1
