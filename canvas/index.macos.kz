@@ -67,6 +67,10 @@ extern fn objc_autoreleasePoolPush() callconv(.c) *anyopaque;
 extern fn objc_autoreleasePoolPop(*anyopaque) callconv(.c) void;
 extern fn CGImageGetWidth(image: Id) callconv(.c) usize;
 extern fn CGImageGetHeight(image: Id) callconv(.c) usize;
+extern fn CFDataCreate(allocator: ?*anyopaque, bytes: ?[*]const u8, length: usize) callconv(.c) Id;
+extern fn CFRelease(cf: Id) callconv(.c) void;
+extern fn CGImageSourceCreateWithData(data: Id, options: ?*anyopaque) callconv(.c) Id;
+extern fn CGImageSourceCreateImageAtIndex(isrc: Id, index: usize, options: ?*anyopaque) callconv(.c) Id;
 extern fn CGColorSpaceCreateDeviceRGB() callconv(.c) Id;
 extern fn CGBitmapContextCreate(data: ?*anyopaque, width: usize, height: usize, bitsPerComponent: usize, bytesPerRow: usize, space: Id, bitmapInfo: u32) callconv(.c) Id;
 extern fn CGBitmapContextGetData(c: Id) callconv(.c) ?*anyopaque;
@@ -3175,6 +3179,95 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
     // records needs_reset and draw.image re-pins it after the grow.
     _ = win.images.slot(handle, img);
     return .{ .img = @as(i64, handle) };
+}
+
+// Decode an image from in-memory bytes (embedded .riv assets) — same
+// rasterize+atlas path as image.load, keyed by content hash so repeat
+// loads of identical bytes share one decode.
+fn decodeImageData(data: []const u8) union(enum) { ok: struct { handle: i64 }, err: []const u8 } {
+    const pool = objc_autoreleasePoolPush();
+    defer objc_autoreleasePoolPop(pool);
+
+    var h: u64 = 1469598103934665603;
+    for (data) |b| { h ^= b; h *%= 1099511628211; }
+    const key = std.fmt.allocPrint(std.heap.page_allocator, "data:{x}", .{h}) catch @panic("metal: OOM");
+    defer std.heap.page_allocator.free(key);
+    if (image_paths.get(key)) |eh| {
+        const e = &decoded_images.items[eh - 1];
+        if (e.live) {
+            e.refs += 1;
+            return .{ .ok = .{ .handle = @as(i64, eh) } };
+        }
+    }
+
+    const cfdata = CFDataCreate(null, data.ptr, data.len);
+    if (cfdata == null) return .{ .err = "metal: image data wrap failed" };
+    defer CFRelease(cfdata);
+    const isrc = CGImageSourceCreateWithData(cfdata, null);
+    if (isrc == null) return .{ .err = "metal: not a decodable image" };
+    defer CFRelease(isrc);
+    const cg = CGImageSourceCreateImageAtIndex(isrc, 0, null);
+    if (cg == null) return .{ .err = "metal: no CGImage in data" };
+    const w = CGImageGetWidth(cg);
+    const hh = CGImageGetHeight(cg);
+    if (w == 0 or hh == 0) return .{ .err = "metal: zero-size image" };
+
+    const cs = CGColorSpaceCreateDeviceRGB();
+    const bctx = CGBitmapContextCreate(null, w, hh, 8, w * 4, cs, 2 | (2 << 12));
+    if (bctx == null) return .{ .err = "metal: bitmap context failed" };
+    CGContextDrawImage(bctx, .{ .origin = .{ .x = 0, .y = 0 }, .size = .{ .width = @floatFromInt(w), .height = @floatFromInt(hh) } }, cg);
+    const px = CGBitmapContextGetData(bctx) orelse return .{ .err = "metal: no bitmap data" };
+    const buf = std.heap.page_allocator.alloc(u8, w * hh * 4) catch @panic("metal: OOM decoding image");
+    @memcpy(buf, @as([*]u8, @ptrCast(px))[0 .. w * hh * 4]);
+    CGContextRelease(bctx);
+    CFRelease(cs);
+
+    const key_copy = std.heap.page_allocator.dupe(u8, key) catch @panic("metal: OOM on image key");
+    const img: DecodedImage = .{ .pixels = buf, .w = @intCast(w), .h = @intCast(hh), .refs = 1, .live = true, .path = key_copy };
+    decoded_images.append(std.heap.page_allocator, img) catch @panic("metal: OOM registering image");
+    const handle: u32 = @intCast(decoded_images.items.len);
+    image_paths.put(std.heap.page_allocator, key_copy, handle) catch @panic("metal: OOM on image path map");
+    return .{ .ok = .{ .handle = @as(i64, handle) } };
+}
+
+~pub tor image.load.data { win: *Window<opened|active>, data: string } | img i64 | err string
+
+~proc image.load.data|zig {
+    const r = decodeImageData(data);
+    switch (r) {
+        .ok => |o| {
+            const e = &decoded_images.items[@intCast(o.handle - 1)];
+            _ = win.images.slot(@intCast(o.handle), e.*);
+            return .{ .img = o.handle };
+        },
+        .err => |m| return .{ .err = m },
+    }
+}
+
+~pub tor offscreen.image.load.data { s: *Surface<ready>, data: string } | img i64 | err string
+
+~proc offscreen.image.load.data|zig {
+    const r = decodeImageData(data);
+    switch (r) {
+        .ok => |o| {
+            const e = &decoded_images.items[@intCast(o.handle - 1)];
+            _ = s.images.slot(@intCast(o.handle), e.*);
+            return .{ .img = o.handle };
+        },
+        .err => |m| return .{ .err = m },
+    }
+}
+
+// Decode-only variant — no window/surface needed; draw.image slots the
+// handle into whatever atlas the frame carries. Used by op-replay probes.
+~pub tor image.decode.data { data: string } | img i64 | err string
+
+~proc image.decode.data|zig {
+    const r = decodeImageData(data);
+    switch (r) {
+        .ok => |o| return .{ .img = o.handle },
+        .err => |m| return .{ .err = m },
+    }
 }
 
 // Release one reference on a decoded image — the last ref frees its
