@@ -208,6 +208,9 @@ const msl_src: [:0]const u8 =
     \\                          // points), rim-light width, aberration frac
     \\                          // kind 6: scatter radius, rim-chamfer width
     \\                          // (both in points), grain sparkle, milk density
+    \\    float4 cm_rect;       // clip.push.path mask: device x0,y0,x1,y1
+    \\    float4 cm_uv;         // mask's uv window in the paths atlas
+    \\    float4 cm_misc;       // x != 0 → sample the mask into clip_cover
     \\};
     \\struct InstOut {
     \\    float4 pos [[position]];
@@ -352,6 +355,16 @@ const msl_src: [:0]const u8 =
     \\        float caa = max(fwidth(cd), 0.0001) * 0.5;
     \\        uint bit = q.y < 0.0 ? (q.x < 0.0 ? 1u : 2u) : (q.x < 0.0 ? 8u : 4u);
     \\        if ((uint(corners) & bit) != 0u) clip_cover = 1.0 - smoothstep(-caa, caa, cd);
+    \\        if (clip_cover <= 0.0) discard_fragment();
+    \\    }
+    \\    // clip.push.path — the accumulated path-clip mask lives in the
+    \\    // paths atlas; coverage multiplies into clip_cover like the
+    \\    // rounded-rect term, so every kind inherits it for free.
+    \\    if (i.cm_misc.x > 0.5) {
+    \\        constexpr sampler s(filter::linear, address::clamp_to_edge);
+    \\        float2 mm = (in.world - i.cm_rect.xy) / max(i.cm_rect.zw - i.cm_rect.xy, float2(1e-4));
+    \\        float ma = paths.sample(s, i.cm_uv.xy + clamp(mm, 0.0, 1.0) * (i.cm_uv.zw - i.cm_uv.xy)).a;
+    \\        clip_cover *= ma;
     \\        if (clip_cover <= 0.0) discard_fragment();
     \\    }
     \\    float2 half_size = i.rect.zw * 0.5;
@@ -562,6 +575,10 @@ const GpuInstance = extern struct {
     kind: f32,
     clip_round: f32,
     silk: [4]f32,
+    // clip.push.path mask — device rect(4) + atlas uv(4) + on flag(4),
+    // stamped by instPush from the frame's clip stack. Default zeros so
+    // the 17 literal sites stay untouched.
+    clip_mask: [12]f32 = @splat(0),
 };
 
 const inst_quad: f32 = 0;
@@ -597,8 +614,22 @@ fn clipRound(f: *const Frame) f32 {
     return 15.0 * 4096.0 + r;
 }
 
+// One clip_stack slot's path-mask half — `on` marks a clip.push.path
+// entry; mask is device rect(4) + paths-atlas uv(4). Rect pushes store
+// on=false so curClipMask falls through to "no mask".
+const ClipEntry = struct { on: bool = false, path: i64 = 0, evenodd: i64 = 0, ctm: [6]f64 = @splat(0), mask: [8]f32 = @splat(0) };
+
+fn curClipMask(f: *const Frame) [12]f32 {
+    if (f.clip_depth == 0) return @splat(0);
+    const e = &f.clip_path[f.clip_depth - 1];
+    if (!e.on) return @splat(0);
+    return .{ e.mask[0], e.mask[1], e.mask[2], e.mask[3], e.mask[4], e.mask[5], e.mask[6], e.mask[7], 1, 0, 0, 0 };
+}
+
 fn instPush(f: *Frame, inst: GpuInstance) void {
-    f.insts.append(std.heap.page_allocator, inst) catch @panic("metal: OOM pushing instance");
+    var i = inst;
+    i.clip_mask = curClipMask(f);
+    f.insts.append(std.heap.page_allocator, i) catch @panic("metal: OOM pushing instance");
 }
 
 // Records any pending instances through the instanced pipeline. Called by
@@ -1773,6 +1804,7 @@ pub const Frame = struct {
     // surface) resets it per frame; offscreen.frame returns it as `insts`.
     flushed: *usize,
     clip_stack: [16][5]f32,
+    clip_path: [16]ClipEntry = @splat(.{}),
     clip_depth: u8,
     text: *TextSystem,
     images: *ImageAtlas,
@@ -2838,6 +2870,7 @@ pub const Surface = struct {
         y1 = @min(y1, parent[3]);
     }
     f.clip_stack[f.clip_depth] = .{ x0, y0, x1, y1, 0.0 };
+    f.clip_path[f.clip_depth] = .{};
     f.clip_depth += 1;
 }
 
@@ -2861,6 +2894,7 @@ pub const Surface = struct {
         y1 = @min(y1, parent[3]);
     }
     f.clip_stack[f.clip_depth] = .{ x0, y0, x1, y1, @floatCast(radius) };
+    f.clip_path[f.clip_depth] = .{};
     f.clip_depth += 1;
 }
 
@@ -3520,4 +3554,205 @@ fn rasterizePath(
         .clip_round = clipRound(f),
         .silk = .{ 0, 0, 0, 0 },
     });
+}
+
+// ---- clip.push.path ---------------------------------------------------------
+// Path clips compose by AND-ing coverage, not by intersecting bounds:
+// every active path clip plus the new one rasterizes filled-white into a
+// COMMON bounds rect, alphas multiply pixel-wise, and the combined mask
+// shelves in the paths atlas. Each clip_stack entry stores the mask valid
+// from its depth down, so pop restores the previous intersection for
+// free. Rect clips keep working untouched — the shader tests both
+// independently, which IS the intersection.
+
+fn clipBoundsOf(d: *PathData, ctm: [6]f64) ?[4]f64 {
+    var minx = std.math.inf(f64);
+    var miny = std.math.inf(f64);
+    var maxx = -std.math.inf(f64);
+    var maxy = -std.math.inf(f64);
+    var pi: usize = 0;
+    for (d.verbs.items) |v| {
+        const n = pathPtCount(v);
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            const q = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+            pi += 2;
+            minx = @min(minx, q[0]);
+            maxx = @max(maxx, q[0]);
+            miny = @min(miny, q[1]);
+            maxy = @max(maxy, q[1]);
+        }
+    }
+    if (minx == std.math.inf(f64)) return null;
+    return .{ minx, miny, maxx, maxy };
+}
+
+// Same verb→CGPath walk as rasterizePath but into caller-supplied raster
+// bounds — every clip path in a stack shares one raster space so their
+// alpha planes AND pixel-aligned.
+fn clipCGPath(d: *PathData, ctm: [6]f64, x0: f64, y0: f64, x1: f64, y1: f64) Id {
+    _ = y0;
+    _ = x1; // raster mapping needs only the left edge + top edge
+    const cpath = CGPathCreateMutable();
+    if (cpath == null) return null;
+    var pi: usize = 0;
+    for (d.verbs.items) |v| {
+        switch (v) {
+            0, 1 => {
+                const q = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                pi += 2;
+                if (v == 0) {
+                    CGPathMoveToPoint(cpath, null, q[0] - x0, y1 - q[1]);
+                } else {
+                    CGPathAddLineToPoint(cpath, null, q[0] - x0, y1 - q[1]);
+                }
+            },
+            2 => {
+                const c = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                const e = ctmXform(ctm, d.pts.items[pi + 2], d.pts.items[pi + 3]);
+                pi += 4;
+                CGPathAddQuadCurveToPoint(cpath, null, c[0] - x0, y1 - c[1], e[0] - x0, y1 - e[1]);
+            },
+            4 => {
+                const c1 = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                const c2 = ctmXform(ctm, d.pts.items[pi + 2], d.pts.items[pi + 3]);
+                const e = ctmXform(ctm, d.pts.items[pi + 4], d.pts.items[pi + 5]);
+                pi += 6;
+                CGPathAddCurveToPoint(cpath, null, c1[0] - x0, y1 - c1[1], c2[0] - x0, y1 - c2[1], e[0] - x0, y1 - e[1]);
+            },
+            5 => CGPathCloseSubpath(cpath),
+            else => {},
+        }
+    }
+    return cpath;
+}
+
+// One clip path filled opaque-white into a w×h BGRA raster at the common
+// origin — returns pixels the caller ANDs into the combined mask.
+fn clipMaskRaster(d: *PathData, ctm: [6]f64, x0: f64, y0: f64, x1: f64, y1: f64, w: usize, h: usize, evenodd: i64) ?[]u8 {
+    const cpath = clipCGPath(d, ctm, x0, y0, x1, y1) orelse return null;
+    defer cf.CFRelease(cpath);
+    const cs = CGColorSpaceCreateDeviceRGB();
+    if (cs == null) return null;
+    defer cf.CFRelease(cs);
+    const bctx = CGBitmapContextCreate(null, w, h, 8, w * 4, cs, 2 | (2 << 12));
+    if (bctx == null) return null;
+    defer CGContextRelease(bctx);
+    CGContextSetShouldAntialias(bctx, true);
+    CGContextAddPath(bctx, cpath);
+    const col = CGColorCreateGenericRGB(1, 1, 1, 1);
+    if (col != null) {
+        defer cf.CFRelease(col);
+        CGContextSetFillColorWithColor(bctx, col);
+    }
+    CGContextDrawPath(bctx, if (evenodd != 0) 1 else 0);
+    const data = CGBitmapContextGetData(bctx) orelse return null;
+    const px = std.heap.page_allocator.alloc(u8, w * h * 4) catch @panic("metal: OOM rasterizing clip mask");
+    @memcpy(px, @as([*]u8, @ptrCast(data))[0 .. w * h * 4]);
+    return px;
+}
+
+// Clip the rest of the frame to a path's interior — fill rule via
+// `evenodd` (nonzero winding otherwise). Composes with every clip
+// already on the stack: rect parts untouched, path parts AND-ed into one
+// accumulated mask in the paths atlas. The mask persists until the
+// matching clip.pop — atlas slots are per-frame, clips are per-frame.
+~pub tor draw.clip.push.path { f: *Frame<frame>, p: i64, evenodd: i64 }
+
+~proc draw.clip.push.path|zig {
+    if (f.clip_depth >= f.clip_stack.len) @panic("metal: draw.clip.push.path overflow (16 deep)");
+    const d = pathAt(p);
+    const ctm = ctmCurrent(f);
+
+    // Union device-bounds: each active entry contributes its STORED mask
+    // rect (device space, baked at its own push-time CTM), the new path
+    // contributes bounds under the CURRENT ctm.
+    var minx = std.math.inf(f64);
+    var miny = std.math.inf(f64);
+    var maxx = -std.math.inf(f64);
+    var maxy = -std.math.inf(f64);
+    var i: usize = 0;
+    while (i < f.clip_depth) : (i += 1) {
+        const e = &f.clip_path[i];
+        if (!e.on) continue;
+        minx = @min(minx, @as(f64, e.mask[0])); maxx = @max(maxx, @as(f64, e.mask[2]));
+        miny = @min(miny, @as(f64, e.mask[1])); maxy = @max(maxy, @as(f64, e.mask[3]));
+    }
+    if (clipBoundsOf(d, ctm)) |b| {
+        minx = @min(minx, b[0]); maxx = @max(maxx, b[2]);
+        miny = @min(miny, b[1]); maxy = @max(maxy, b[3]);
+    }
+    if (minx == std.math.inf(f64)) @panic("metal: draw.clip.push.path with an empty path");
+    const pad = 2.0;
+    const x0 = @floor(minx - pad);
+    const y0 = @floor(miny - pad);
+    const x1 = @ceil(maxx + pad);
+    const y1 = @ceil(maxy + pad);
+    const w: usize = @intFromFloat(x1 - x0);
+    const h: usize = @intFromFloat(y1 - y0);
+    if (w == 0 or h == 0 or w > atlas_max or h > atlas_max)
+        @panic("metal: draw.clip.push.path mask doesn't fit the path atlas");
+
+    // AND coverage: alpha product across every active path clip + new.
+    var acc = std.heap.page_allocator.alloc(u8, w * h) catch @panic("metal: OOM in clip mask");
+    defer std.heap.page_allocator.free(acc);
+    @memset(acc, 255);
+    var first = true;
+    i = 0;
+    while (i <= f.clip_depth) : (i += 1) {
+        const is_new = i == f.clip_depth;
+        if (!is_new) {
+            const e = &f.clip_path[i];
+            if (!e.on) continue;
+        }
+        const pd = if (is_new) d else pathAt(f.clip_path[i].path);
+        const pe = if (is_new) evenodd else f.clip_path[i].evenodd;
+        // Old entries re-raster under THEIR push-time CTM — the mask is
+        // device-space-fixed once pushed; the current CTM would drift it.
+        const pctm = if (is_new) ctm else f.clip_path[i].ctm;
+        const rp = clipMaskRaster(pd, pctm, x0, y0, x1, y1, w, h, pe) orelse
+            @panic("metal: draw.clip.push.path raster failed");
+        defer std.heap.page_allocator.free(rp);
+        var px_i: usize = 0;
+        while (px_i < w * h) : (px_i += 1) {
+            const a = rp[px_i * 4 + 3];
+            if (first) {
+                acc[px_i] = a;
+            } else {
+                acc[px_i] = @intCast((@as(u32, acc[px_i]) * @as(u32, a)) / 255);
+            }
+        }
+        first = false;
+    }
+
+    // Pack the combined mask as premultiplied-white BGRA (shader reads .a).
+    const px = std.heap.page_allocator.alloc(u8, w * h * 4) catch @panic("metal: OOM in clip mask");
+    var j: usize = 0;
+    while (j < w * h) : (j += 1) {
+        const a = acc[j];
+        px[j * 4] = a;
+        px[j * 4 + 1] = a;
+        px[j * 4 + 2] = a;
+        px[j * 4 + 3] = a;
+    }
+    const uv = f.paths_img.slot(px, @intCast(w), @intCast(h)) orelse
+        @panic("metal: draw.clip.push.path mask doesn't fit the path atlas");
+    std.heap.page_allocator.free(px);
+
+    // Rect part of the clip is unchanged — inherit the parent's entry
+    // verbatim (preserves rect AND round); depth==0 stores the unclipped
+    // sentinel the shader already treats as "no rect clip".
+    if (f.clip_depth > 0) {
+        f.clip_stack[f.clip_depth] = f.clip_stack[f.clip_depth - 1];
+    } else {
+        f.clip_stack[f.clip_depth] = .{ no_clip[0], no_clip[1], no_clip[2], no_clip[3], 0.0 };
+    }
+    f.clip_path[f.clip_depth] = .{
+        .on = true,
+        .path = p,
+        .evenodd = evenodd,
+        .ctm = ctm,
+        .mask = .{ @floatCast(x0), @floatCast(y0), @floatCast(x1), @floatCast(y1), uv[0], uv[1], uv[2], uv[3] },
+    };
+    f.clip_depth += 1;
 }
