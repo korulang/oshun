@@ -586,7 +586,9 @@ const msl_src: [:0]const u8 =
     \\    float area = e0.x * (in.v2.y - in.v0.y) - e0.y * (in.v2.x - in.v0.x);
     \\    float sgn = area >= 0.0 ? 1.0 : -1.0;
     \\    float dmin = min(min(d0, d1), d2) * sgn;
-    \\    float cov = clamp(dmin + 0.5, 0.0, 1.0);
+    \\    // Degenerate tris (area~0) have no defined interior — emit 0,
+    \\    // not an arbitrary-sign ramp (was painting cov=1 frame-wide).
+    \\    float cov = clamp(dmin + 0.5, 0.0, 1.0) * step(1e-6, abs(area));
     \\    float4 c = in.color;
     \\    return float4(c.rgb, c.a * cov);
     \\}
