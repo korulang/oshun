@@ -553,18 +553,42 @@ const msl_src: [:0]const u8 =
     \\struct TriOut {
     \\    float4 pos [[position]];
     \\    float4 color;
+    \\    float2 v0;
+    \\    float2 v1;
+    \\    float2 v2;
+    \\    float2 frag;
     \\};
     \\vertex TriOut tri_vertex(uint vid [[vertex_id]],
     \\                          constant float2 *verts [[buffer(0)]],
     \\                          constant TriParams& p [[buffer(1)]]) {
+    \\    uint base = (vid / 3) * 3;
     \\    float2 pix = verts[vid];
     \\    TriOut o;
     \\    o.pos = float4(pix.x / p.viewport.x * 2.0 - 1.0, 1.0 - pix.y / p.viewport.y * 2.0, 0.0, 1.0);
     \\    o.color = p.color;
+    \\    o.v0 = verts[base];
+    \\    o.v1 = verts[base + 1];
+    \\    o.v2 = verts[base + 2];
+    \\    o.frag = pix;
     \\    return o;
     \\}
     \\fragment float4 tri_fragment(TriOut in [[stage_in]]) {
-    \\    return in.color;
+    \\    float2 p = in.frag;
+    \\    float2 e0 = in.v1 - in.v0;
+    \\    float2 e1 = in.v2 - in.v1;
+    \\    float2 e2 = in.v0 - in.v2;
+    \\    float l0 = max(length(e0), 1e-4);
+    \\    float l1 = max(length(e1), 1e-4);
+    \\    float l2 = max(length(e2), 1e-4);
+    \\    float d0 = (e0.x * (p.y - in.v0.y) - e0.y * (p.x - in.v0.x)) / l0;
+    \\    float d1 = (e1.x * (p.y - in.v1.y) - e1.y * (p.x - in.v1.x)) / l1;
+    \\    float d2 = (e2.x * (p.y - in.v2.y) - e2.y * (p.x - in.v2.x)) / l2;
+    \\    float area = e0.x * (in.v2.y - in.v0.y) - e0.y * (in.v2.x - in.v0.x);
+    \\    float sgn = area >= 0.0 ? 1.0 : -1.0;
+    \\    float dmin = min(min(d0, d1), d2) * sgn;
+    \\    float cov = clamp(dmin + 0.5, 0.0, 1.0);
+    \\    float4 c = in.color;
+    \\    return float4(c.rgb, c.a * cov);
     \\}
 ;
 
