@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "paths": {
     "libs": "../..",
-    "oshun": "../.."
+    "oshun": "../..",
+    "kr": "../../../koru-rive",
+    "probe": "./riveprobe",
+    "std_grid": "../../koru/koru_std"
   }
 }
