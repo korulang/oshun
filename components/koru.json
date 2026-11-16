@@ -1,8 +1,10 @@
 {
   "name": "@korulang/components",
   "version": "0.0.1",
-  "description": "OMNI's element vocabulary above libs/canvas — named draw chains dispatched by kind",
+  "description": "OMNI's element vocabulary above libs/canvas \u2014 named draw chains dispatched by kind",
   "paths": {
-    "libs": ".."
+    "libs": "..",
+    "kr": "../../koru-rive",
+    "probe": "../canvas/tests/riveprobe"
   }
 }

@@ -1,0 +1,33 @@
+// @korulang/components/rive_card — a .riv as a leaf canvas component.
+//
+// Owns the Riv handle for one replay: opens the file, advances the
+// state machine to `fr`, replays the flat ops stream through the
+// probe's cond-dispatch step into the caller's frame, frees.
+// Display-only — no input routing, no data binding; the host places
+// and sizes the card (list layout is Omni Toolkit's, not ours).
+//
+// Ops coordinates are artboard space; the card maps them into
+// x/y/w/h via a push transform (uniform scale from a 500-unit
+// artboard — clfp Main's bounds).
+
+~import libs/canvas
+~import kr/rive
+~import probe
+
+~pub tor rive-card {
+    f: *libs/canvas:Frame<frame>,
+    path: string,
+    ab: i64,
+    fr: i64,
+    x: f64, y: f64, w: f64, h: f64,
+}
+~rive-card =
+    |> libs/canvas:transform.push(f, a: w / 500.0, b: 0.0, c: 0.0, d: h / 500.0, e: x, g: y)
+    |> kr/rive:open(path)
+    | loaded r
+        |> kr/rive:ops(r, ab, frame: fr)
+            ! op o |> probe:step(o, f)
+            | done _ |> kr/rive:free(r) |> libs/canvas:transform.pop(f)
+    | failed _
+        |> libs/canvas:draw.rect(f, x, y, w, h, r: 0.4, g: 0.2, b: 0.2, a: 0.5)
+        |> libs/canvas:transform.pop(f)
