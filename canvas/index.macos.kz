@@ -114,6 +114,20 @@ extern fn CGContextSetShouldAntialias(ctx: CId, v: bool) callconv(.c) void;
 extern fn CGContextSetShouldSmoothFonts(ctx: CId, v: bool) callconv(.c) void;
 extern fn CGContextSetAllowsFontSubpixelPositioning(ctx: CId, v: bool) callconv(.c) void;
 extern fn CGContextSetShouldSubpixelPositionFonts(ctx: CId, v: bool) callconv(.c) void;
+// CGPath + paint state for draw.path's CoreGraphics rasterization pass.
+extern fn CGPathCreateMutable() callconv(.c) Id;
+extern fn CGPathMoveToPoint(path: Id, transform: ?*anyopaque, x: f64, y: f64) callconv(.c) void;
+extern fn CGPathAddLineToPoint(path: Id, transform: ?*anyopaque, x: f64, y: f64) callconv(.c) void;
+extern fn CGPathAddQuadCurveToPoint(path: Id, transform: ?*anyopaque, cx: f64, cy: f64, x: f64, y: f64) callconv(.c) void;
+extern fn CGPathAddCurveToPoint(path: Id, transform: ?*anyopaque, c1x: f64, c1y: f64, c2x: f64, c2y: f64, x: f64, y: f64) callconv(.c) void;
+extern fn CGPathCloseSubpath(path: Id) callconv(.c) void;
+extern fn CGColorCreateGenericRGB(red: f64, green: f64, blue: f64, alpha: f64) callconv(.c) Id;
+extern fn CGContextSetFillColorWithColor(ctx: CId, color: Id) callconv(.c) void;
+extern fn CGContextSetStrokeColorWithColor(ctx: CId, color: Id) callconv(.c) void;
+extern fn CGContextSetLineWidth(ctx: CId, width: f64) callconv(.c) void;
+extern fn CGContextSetLineJoin(ctx: CId, join: i32) callconv(.c) void;
+extern fn CGContextSetLineCap(ctx: CId, cap: i32) callconv(.c) void;
+extern fn CGContextDrawPath(ctx: CId, mode: u32) callconv(.c) void;
 extern var kCTFontAttributeName: Id;
 extern var kCTForegroundColorFromContextAttributeName: Id;
 
@@ -322,6 +336,7 @@ const msl_src: [:0]const u8 =
     \\                             texture2d<float> atlas [[texture(0)]],
     \\                             texture2d<float> images [[texture(1)]],
     \\                             texture2d<float> scene [[texture(2)]],
+    \\                             texture2d<float> paths [[texture(3)]],
     \\                             constant float &ftime [[buffer(2)]]) {
     \\    Inst i = insts[in.inst];
     \\    if (in.world.x < i.clip.x || in.world.y < i.clip.y || in.world.x > i.clip.z || in.world.y > i.clip.w)
@@ -357,6 +372,14 @@ const msl_src: [:0]const u8 =
     \\        float4 c = images.sample(s, in.uv);
     \\        // Atlas pixels are BGRA-PREMULTIPLIED; the pipeline blends
     \\        // SourceAlpha/1-SourceAlpha, so straighten before tinting.
+    \\        c.rgb /= max(c.a, 1e-5);
+    \\        return c * i.color * clip_cover;
+    \\    }
+    \\    if (i.kind == 10.0) {
+    \\        // Rasterized vector path — same BGRA-premultiplied contract
+    \\        // as the image atlas, shelved in the per-frame path atlas.
+    \\        constexpr sampler s(filter::linear, address::clamp_to_edge);
+    \\        float4 c = paths.sample(s, in.uv);
     \\        c.rgb /= max(c.a, 1e-5);
     \\        return c * i.color * clip_cover;
     \\    }
@@ -549,6 +572,7 @@ const inst_frost: f32 = 6;
 const inst_stroke: f32 = 7;
 const inst_gradient: f32 = 8;
 const inst_gradient_radial: f32 = 9;
+const inst_pathtex: f32 = 10;
 // NOTE: the native arm (index.koru-native.kz) does not implement kinds 8/9 yet.
 // A native consumer calling draw.gradient refuses at compile, not silently.
 
@@ -605,6 +629,7 @@ fn instFlush(f: *Frame) void {
     // target). Uncaptured frames bind the image atlas — kind-6 draws refuse
     // to record before a capture, so nothing samples a stale slot.
     send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.scene_tex.* orelse f.images.texture, 2);
+    send2(void, Id, u64, f.encoder, sel("setFragmentTexture:atIndex:"), f.paths_img.texture, 3);
     send4(void, u64, u64, u64, u64, f.encoder, sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), 4, 0, 4, n);
     f.flushed.* += n;
     f.insts.clearRetainingCapacity();
@@ -939,6 +964,19 @@ const TextSystem = struct {
 
 const DecodedImage = struct { pixels: []u8, w: u32, h: u32, refs: u32, live: bool, path: []u8 };
 var decoded_images: std.ArrayList(DecodedImage) = .empty;
+
+// Vector path registry — path.open mints a 1-based handle into `paths`,
+// the same custody shape image.load uses for decoded_images. Geometry is
+// window-independent (the frame's CTM applies at draw.path raster time),
+// so the registry is module-level. verbs carry PathVerb values
+// (move=0 line=1 quad=2 cubic=4 close=5 — Skia's numbering, matching the
+// Rive oracle's golden streams); pts is the flat x,y emission stream.
+const PathData = struct {
+    verbs: std.ArrayList(u8) = .empty,
+    pts: std.ArrayList(f64) = .empty,
+    live: bool = true,
+};
+var paths: std.ArrayList(PathData) = .empty;
 var image_paths: std.StringHashMapUnmanaged(u32) = .empty;
 
 // Font faces loaded from files — font.load appends a retained CGFont and
@@ -1030,6 +1068,84 @@ const ImageAtlas = struct {
         };
         a.slots.put(std.heap.page_allocator, handle, uv) catch @panic("metal: OOM in image atlas");
         return uv;
+    }
+};
+
+// Rasterized vector paths ride their own atlas — draw.path flattens
+// geometry through CoreGraphics into BGRA pixels once per call, shelves
+// the result here, and draws an inst_pathtex quad sampling texture(3).
+// Slots reset every beginFrame: paths are immediate-mode — every call
+// re-rasters and re-uploads, so no handle registry or re-pin contract
+// (unlike the persistent image atlas).
+const PathAtlas = struct {
+    device: Id,
+    texture: Id,
+    shelf: Shelf,
+    zeros: std.ArrayList(u8) = .empty,
+    needs_reset: bool = false,
+
+    fn makeTexture(device: Id, side: u32) Id {
+        const desc = send4(Id, u64, u64, u64, bool, cls("MTLTextureDescriptor"), sel("texture2DDescriptorWithPixelFormat:width:height:mipmapped:"), 80, side, side, false); // BGRA8Unorm
+        return send1(Id, Id, device, sel("newTextureWithDescriptor:"), desc) orelse @panic("metal: path atlas texture failed");
+    }
+
+    fn init(device: Id) PathAtlas {
+        return .{ .device = device, .texture = makeTexture(device, atlas_initial), .shelf = .{ .size = atlas_initial } };
+    }
+
+    fn deinit(a: *PathAtlas) void {
+        a.zeros.deinit(std.heap.page_allocator);
+        send(void, a.texture, sel("release"));
+    }
+
+    // Frame start: every slot is dead by definition (immediate-mode), so
+    // the pack restarts unconditionally. needs_reset only survives to
+    // grow the shelf when last frame's rasters overflowed.
+    fn beginFrame(a: *PathAtlas) void {
+        a.shelf.x = 0;
+        a.shelf.y = 0;
+        a.shelf.h = 0;
+        if (a.needs_reset and a.shelf.size < atlas_max) {
+            a.shelf.grow();
+            send(void, a.texture, sel("release"));
+            a.texture = makeTexture(a.device, a.shelf.size);
+        }
+        a.needs_reset = false;
+    }
+
+    // Shelve one rasterized path (BGRA-premultiplied, same pixel contract
+    // as DecodedImage) and return its inner uv rect, or null when it
+    // doesn't fit — the draw skips and retries next frame.
+    fn slot(a: *PathAtlas, pixels: []u8, w: u32, h: u32) ?[4]f32 {
+        const pw = w + 2 * img_atlas_pad;
+        const ph = h + 2 * img_atlas_pad;
+        if (pw > a.shelf.size or ph > a.shelf.size) {
+            a.needs_reset = true;
+            return null;
+        }
+        const origin = a.shelf.allocate(pw, ph) orelse {
+            a.needs_reset = true;
+            return null;
+        };
+        a.zeros.resize(std.heap.page_allocator, pw * ph * 4) catch @panic("metal: OOM in path atlas");
+        @memset(a.zeros.items, 0);
+        const slot_region = MTLRegion{
+            .origin = .{ .x = origin[0], .y = origin[1], .z = 0 },
+            .size = .{ .width = pw, .height = ph, .depth = 1 },
+        };
+        send4(void, MTLRegion, u64, *const anyopaque, u64, a.texture, sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), slot_region, 0, a.zeros.items.ptr, pw * 4);
+        const region = MTLRegion{
+            .origin = .{ .x = origin[0] + img_atlas_pad, .y = origin[1] + img_atlas_pad, .z = 0 },
+            .size = .{ .width = w, .height = h, .depth = 1 },
+        };
+        send4(void, MTLRegion, u64, *const anyopaque, u64, a.texture, sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), region, 0, pixels.ptr, w * 4);
+        const s: f32 = @floatFromInt(a.shelf.size);
+        return .{
+            @as(f32, @floatFromInt(origin[0] + img_atlas_pad)) / s,
+            @as(f32, @floatFromInt(origin[1] + img_atlas_pad)) / s,
+            @as(f32, @floatFromInt(origin[0] + img_atlas_pad + w)) / s,
+            @as(f32, @floatFromInt(origin[1] + img_atlas_pad + h)) / s,
+        };
     }
 };
 
@@ -1483,9 +1599,10 @@ fn drawLiveFrame(win: *Window, cb: *const fn (*Frame) void) void {
     const enc = send1(Id, Id, buf, sel("renderCommandEncoderWithDescriptor:"), desc);
     send1(void, Id, enc, sel("setRenderPipelineState:"), win.pso);
     win.flushed = 0;
-    var f = Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast(CACurrentMediaTime()) };
+    var f = Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast(CACurrentMediaTime()) };
     win.text.beginFrame();
     win.images.beginFrame();
+    win.path_img.beginFrame();
     cb(&f);
     instFlush(&f);
     send(void, f.encoder, sel("endEncoding"));
@@ -1620,6 +1737,7 @@ pub const Window = struct {
     flushed: usize,
     text: TextSystem,
     images: ImageAtlas,
+    path_img: PathAtlas,
     // draw.capture's staging texture — a Private copy of the render target
     // taken mid-frame, bound at texture(2) for kind-6 panes. Lazily sized
     // to the current target; released in window.close.
@@ -1657,6 +1775,11 @@ pub const Frame = struct {
     clip_depth: u8,
     text: *TextSystem,
     images: *ImageAtlas,
+    paths_img: *PathAtlas,
+    // transform.push/pop stack — 2D affine [a b c d e f] per entry,
+    // depth 0 = identity. Consumed by draw.path's rasterization pass.
+    ctm_stack: [16][6]f64 = undefined,
+    ctm_depth: u8 = 0,
     // Wall-clock seconds at frame start — the ambient clock materials
     // animate on. Stamped by whoever owns the frame.
     time: f32,
@@ -1929,6 +2052,7 @@ fn windowCore(wobj: Id, width: i32, height: i32) WcResult {
         .flushed = 0,
         .text = .init(device, @floatCast(bs0)),
         .images = .init(device),
+        .path_img = .init(device),
         .scene_tex = null,
     };
     live_win = w;
@@ -2161,7 +2285,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
         $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), win.pso);
 
         win.flushed = 0;
-        var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .time = @floatCast($mod.CACurrentMediaTime()) };
+        var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
         win.text.beginFrame();
         win.images.beginFrame();
         frame(&__f);
@@ -2201,6 +2325,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
     win.insts.deinit(std.heap.page_allocator);
     win.text.deinit();
     win.images.deinit();
+    win.path_img.deinit();
     std.heap.page_allocator.destroy(win);
 }
 
@@ -2238,6 +2363,7 @@ pub const Surface = struct {
     flushed: usize,
     text: TextSystem,
     images: ImageAtlas,
+    path_img: PathAtlas,
     // draw.capture's staging texture — same role as Window.scene_tex.
     scene_tex: Id,
     // The last committed command buffer, retained — offscreen.wait reads its
@@ -2305,6 +2431,7 @@ pub const Surface = struct {
         .flushed = 0,
         .text = .init(device, @floatCast(scale)),
         .images = .init(device),
+        .path_img = .init(device),
         .scene_tex = null,
         .last = null,
     };
@@ -2345,9 +2472,10 @@ pub const Surface = struct {
     $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), s.pso);
 
     s.flushed = 0;
-    var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = s.tex, .scene_tex = &s.scene_tex, .captured = false, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .time = @floatCast($mod.CACurrentMediaTime()) };
+    var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = s.tex, .scene_tex = &s.scene_tex, .captured = false, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .paths_img = &s.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
     s.text.beginFrame();
     s.images.beginFrame();
+    s.path_img.beginFrame();
     frame(&__f);
 
     $mod.instFlush(&__f);
@@ -2390,6 +2518,7 @@ pub const Surface = struct {
     s.insts.deinit(std.heap.page_allocator);
     s.text.deinit();
     s.images.deinit();
+    s.path_img.deinit();
     std.heap.page_allocator.destroy(s);
 }
 
