@@ -128,6 +128,7 @@ extern fn CGContextSetLineWidth(ctx: CId, width: f64) callconv(.c) void;
 extern fn CGContextSetLineJoin(ctx: CId, join: i32) callconv(.c) void;
 extern fn CGContextSetLineCap(ctx: CId, cap: i32) callconv(.c) void;
 extern fn CGContextDrawPath(ctx: CId, mode: u32) callconv(.c) void;
+extern fn CGContextAddPath(ctx: CId, path: Id) callconv(.c) void;
 extern var kCTFontAttributeName: Id;
 extern var kCTForegroundColorFromContextAttributeName: Id;
 
@@ -3202,4 +3203,321 @@ fn pushTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, 
         return .{ .err = "metal: not a font file" };
     loaded_fonts.append(std.heap.page_allocator, cg) catch @panic("metal: OOM registering font");
     return .{ .font = @intCast(loaded_fonts.items.len) };
+}
+
+// ============================================================================
+// Vector paths — arbitrary fill/stroke geometry, the Rive-runtime forcing
+// function's first canvas growth (omni/commissions/rive-runtime.md).
+//
+// Lifecycle mirrors image.load: path.open mints a 1-based handle into the
+// module-level `paths` registry; path.move/line/quad/cubic/close append
+// PathVerb+point pairs; path.free retires it. Geometry is window-free —
+// transform.push/pop keeps a per-frame CTM that draw.path bakes in at
+// raster time.
+//
+// draw.path rasterizes through CoreGraphics (CGPath → CGBitmapContext,
+// fill+stroke in CG's own rules) into BGRA pixels shelved on the frame's
+// PathAtlas, then draws an inst_pathtex quad — the same atlas→instance
+// shape draw.image uses. CG gives correct fill rules, joins, caps, and
+// AA for free; a native Metal tessellator is the documented optimization
+// path, not a correctness gap. Raster scale is 1.0 canvas unit = 1 px —
+// hidpi crispness is unmeasured.
+// ============================================================================
+
+// 2D affine [a b c d e f], column-vector convention: x' = a*x + c*y + e,
+// y' = b*x + d*y + f. ctmMul(a,b) applies b first, then a.
+fn ctmMul(m: [6]f64, n: [6]f64) [6]f64 {
+    return .{
+        m[0] * n[0] + m[2] * n[1],
+        m[1] * n[0] + m[3] * n[1],
+        m[0] * n[2] + m[2] * n[3],
+        m[1] * n[2] + m[3] * n[3],
+        m[0] * n[4] + m[2] * n[5] + m[4],
+        m[1] * n[4] + m[3] * n[5] + m[5],
+    };
+}
+
+fn ctmCurrent(f: *const Frame) [6]f64 {
+    var acc: [6]f64 = .{ 1, 0, 0, 1, 0, 0 };
+    for (f.ctm_stack[0..f.ctm_depth]) |m| acc = ctmMul(acc, m);
+    return acc;
+}
+
+fn ctmXform(ctm: [6]f64, x: f64, y: f64) [2]f64 {
+    return .{ ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5] };
+}
+
+fn pathPtCount(v: u8) usize {
+    return switch (v) {
+        0, 1 => 1, // move, line
+        2 => 2,    // quad: control + end
+        4 => 3,    // cubic: c1 + c2 + end
+        else => 0, // close
+    };
+}
+
+fn pathAt(p: i64) *PathData {
+    if (p <= 0) @panic("metal: path verb with an invalid path handle");
+    const h: usize = @intCast(p);
+    if (h > paths.items.len or !paths.items[h - 1].live) @panic("metal: path verb with an invalid path handle");
+    return &paths.items[h - 1];
+}
+
+const PathRaster = struct { px: []u8, w: u32, h: u32, x: f64, y: f64 };
+
+// Rasterize a path handle through CoreGraphics into BGRA-premultiplied
+// pixels covering its CTM-transformed bounds (plus stroke/AA pad). The
+// canvas is y-down; the bitmap context is Quartz y-up, so raster coords
+// flip y inside the bounds rect — the same convention image.load's
+// CGContextDrawImage path already proves end-to-end.
+fn rasterizePath(
+    f: *Frame,
+    d: *PathData,
+    fr: f64, fg: f64, fb: f64, fa: f64,
+    sr: f64, sg: f64, sb: f64, sa: f64,
+    sw: f64, join: i64, cap: i64, evenodd: i64,
+) ?PathRaster {
+    if (d.verbs.items.len == 0) return null;
+    const ctm = ctmCurrent(f);
+    const scale = @sqrt(@abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]));
+    const stroke_pad = @abs(sw) * scale * 0.5 + 1.5;
+
+    var minx = std.math.inf(f64);
+    var miny = std.math.inf(f64);
+    var maxx = -std.math.inf(f64);
+    var maxy = -std.math.inf(f64);
+    var pi: usize = 0;
+    for (d.verbs.items) |v| {
+        const n = pathPtCount(v);
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            const q = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+            pi += 2;
+            minx = @min(minx, q[0]);
+            maxx = @max(maxx, q[0]);
+            miny = @min(miny, q[1]);
+            maxy = @max(maxy, q[1]);
+        }
+    }
+    if (minx == std.math.inf(f64)) return null;
+    const x0 = @floor(minx - stroke_pad);
+    const y0 = @floor(miny - stroke_pad);
+    const x1 = @ceil(maxx + stroke_pad);
+    const y1 = @ceil(maxy + stroke_pad);
+    const w: usize = @intFromFloat(x1 - x0);
+    const h: usize = @intFromFloat(y1 - y0);
+    if (w == 0 or h == 0 or w > atlas_max or h > atlas_max) return null;
+
+    const cpath = CGPathCreateMutable();
+    if (cpath == null) return null;
+    defer cf.CFRelease(cpath);
+    pi = 0;
+    for (d.verbs.items) |v| {
+        switch (v) {
+            0, 1 => {
+                const q = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                pi += 2;
+                if (v == 0) {
+                    CGPathMoveToPoint(cpath, null, q[0] - x0, y1 - q[1]);
+                } else {
+                    CGPathAddLineToPoint(cpath, null, q[0] - x0, y1 - q[1]);
+                }
+            },
+            2 => {
+                const c = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                const e = ctmXform(ctm, d.pts.items[pi + 2], d.pts.items[pi + 3]);
+                pi += 4;
+                CGPathAddQuadCurveToPoint(cpath, null, c[0] - x0, y1 - c[1], e[0] - x0, y1 - e[1]);
+            },
+            4 => {
+                const c1 = ctmXform(ctm, d.pts.items[pi], d.pts.items[pi + 1]);
+                const c2 = ctmXform(ctm, d.pts.items[pi + 2], d.pts.items[pi + 3]);
+                const e = ctmXform(ctm, d.pts.items[pi + 4], d.pts.items[pi + 5]);
+                pi += 6;
+                CGPathAddCurveToPoint(cpath, null, c1[0] - x0, y1 - c1[1], c2[0] - x0, y1 - c2[1], e[0] - x0, y1 - e[1]);
+            },
+            5 => CGPathCloseSubpath(cpath),
+            else => {},
+        }
+    }
+
+    const cs = CGColorSpaceCreateDeviceRGB();
+    if (cs == null) return null;
+    defer cf.CFRelease(cs);
+    const bctx = CGBitmapContextCreate(null, w, h, 8, w * 4, cs, 2 | (2 << 12));
+    if (bctx == null) return null;
+    defer CGContextRelease(bctx);
+    CGContextSetShouldAntialias(bctx, true);
+    // CGContextDrawPath consumes the CONTEXT's current path — the CGPath
+    // built above is inert until AddPath moves it in.
+    CGContextAddPath(bctx, cpath);
+
+    const do_fill = fa > 0;
+    const do_stroke = sa > 0 and sw > 0;
+    if (!do_fill and !do_stroke) {
+        // Transparent raster still uploads — callers may probe bounds.
+    } else {
+        if (do_fill) {
+            const col = CGColorCreateGenericRGB(fr, fg, fb, fa);
+            if (col != null) {
+                defer cf.CFRelease(col);
+                CGContextSetFillColorWithColor(bctx, col);
+            }
+        }
+        if (do_stroke) {
+            const col = CGColorCreateGenericRGB(sr, sg, sb, sa);
+            if (col != null) {
+                defer cf.CFRelease(col);
+                CGContextSetStrokeColorWithColor(bctx, col);
+            }
+            CGContextSetLineWidth(bctx, @abs(sw) * scale);
+            CGContextSetLineJoin(bctx, @intCast(@max(0, @min(2, join))));
+            CGContextSetLineCap(bctx, @intCast(@max(0, @min(2, cap))));
+        }
+        // CGPathDrawingMode: fill=0 eoFill=1 stroke=2 fillStroke=3
+        // eoFillStroke=4 — one draw consumes the path, so combined
+        // fill+stroke rides the dual modes.
+        const mode: u32 = if (do_fill and do_stroke)
+            (if (evenodd != 0) @as(u32, 4) else 3)
+        else if (do_fill)
+            (if (evenodd != 0) @as(u32, 1) else 0)
+        else
+            2;
+        CGContextDrawPath(bctx, mode);
+    }
+
+    const data = CGBitmapContextGetData(bctx) orelse return null;
+    const px = std.heap.page_allocator.alloc(u8, w * h * 4) catch @panic("metal: OOM rasterizing path");
+    @memcpy(px, @as([*]u8, @ptrCast(data))[0 .. w * h * 4]);
+    return .{ .px = px, .w = @intCast(w), .h = @intCast(h), .x = x0, .y = y0 };
+}
+
+// ---- path lifecycle ---------------------------------------------------------
+
+~pub tor path.open { } -> i64
+
+~proc path.open|zig {
+    paths.append(std.heap.page_allocator, .{}) catch @panic("metal: OOM registering path");
+    return @intCast(paths.items.len);
+}
+
+~pub tor path.move { p: i64, x: f64, y: f64 }
+
+~proc path.move|zig {
+    const d = pathAt(p);
+    d.verbs.append(std.heap.page_allocator, 0) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, x) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, y) catch @panic("metal: OOM in path");
+}
+
+~pub tor path.line { p: i64, x: f64, y: f64 }
+
+~proc path.line|zig {
+    const d = pathAt(p);
+    d.verbs.append(std.heap.page_allocator, 1) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, x) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, y) catch @panic("metal: OOM in path");
+}
+
+~pub tor path.quad { p: i64, cx: f64, cy: f64, x: f64, y: f64 }
+
+~proc path.quad|zig {
+    const d = pathAt(p);
+    d.verbs.append(std.heap.page_allocator, 2) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, cx) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, cy) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, x) catch @panic("metal: OOM in path");
+    d.pts.append(std.heap.page_allocator, y) catch @panic("metal: OOM in path");
+}
+
+~pub tor path.cubic { p: i64, c1x: f64, c1y: f64, c2x: f64, c2y: f64, x: f64, y: f64 }
+
+~proc path.cubic|zig {
+    const d = pathAt(p);
+    d.verbs.append(std.heap.page_allocator, 4) catch @panic("metal: OOM in path");
+    const alloc = std.heap.page_allocator;
+    d.pts.append(alloc, c1x) catch @panic("metal: OOM in path");
+    d.pts.append(alloc, c1y) catch @panic("metal: OOM in path");
+    d.pts.append(alloc, c2x) catch @panic("metal: OOM in path");
+    d.pts.append(alloc, c2y) catch @panic("metal: OOM in path");
+    d.pts.append(alloc, x) catch @panic("metal: OOM in path");
+    d.pts.append(alloc, y) catch @panic("metal: OOM in path");
+}
+
+~pub tor path.close { p: i64 }
+
+~proc path.close|zig {
+    const d = pathAt(p);
+    d.verbs.append(std.heap.page_allocator, 5) catch @panic("metal: OOM in path");
+}
+
+// Clear a path's geometry for reuse — same handle stays valid.
+~pub tor path.reset { p: i64 }
+
+~proc path.reset|zig {
+    const d = pathAt(p);
+    d.verbs.clearRetainingCapacity();
+    d.pts.clearRetainingCapacity();
+}
+
+~pub tor path.free { p: i64 }
+
+~proc path.free|zig {
+    const d = pathAt(p);
+    d.verbs.deinit(std.heap.page_allocator);
+    d.pts.deinit(std.heap.page_allocator);
+    d.verbs = .empty;
+    d.pts = .empty;
+    d.live = false;
+}
+
+// ---- transform stack --------------------------------------------------------
+// transform.push composes `a b c d e g` onto the frame's CTM (last pushed
+// applies first to points — the standard save/restore shape). Consumed by
+// draw.path's rasterization; primitive draw verbs are unchanged (their
+// contract predates the CTM — growing it onto every verb is contract work,
+// not a workaround).
+
+~pub tor transform.push { f: *Frame<frame>, a: f64, b: f64, c: f64, d: f64, e: f64, g: f64 }
+
+~proc transform.push|zig {
+    if (f.ctm_depth >= f.ctm_stack.len) @panic("metal: transform.push overflow (16 deep)");
+    f.ctm_stack[f.ctm_depth] = .{ a, b, c, d, e, g };
+    f.ctm_depth += 1;
+}
+
+~pub tor transform.pop { f: *Frame<frame> }
+
+~proc transform.pop|zig {
+    if (f.ctm_depth == 0) @panic("metal: transform.pop with an empty stack");
+    f.ctm_depth -= 1;
+}
+
+// ---- draw -------------------------------------------------------------------
+
+// One vector path, fill and/or stroke, in one raster. Fill is fr,fg,fb,fa
+// (0-1, premultiplied-out by CG); stroke is sr,sg,sb,sa with width sw.
+// A zero alpha disables that paint — same convention as draw.panel's
+// border. join: 0=miter 1=round 2=bevel; cap: 0=butt 1=round 2=square
+// (CoreGraphics' own numbering). evenodd nonzero selects the even-odd
+// fill rule (Rive's fillRule=2) over nonzero winding.
+~pub tor draw.path { f: *Frame<frame>, p: i64, fr: f64, fg: f64, fb: f64, fa: f64, sr: f64, sg: f64, sb: f64, sa: f64, sw: f64, join: i64, cap: i64, evenodd: i64 }
+
+~proc draw.path|zig {
+    const d = pathAt(p);
+    const r = rasterizePath(f, d, fr, fg, fb, fa, sr, sg, sb, sa, sw, join, cap, evenodd) orelse return;
+    defer std.heap.page_allocator.free(r.px);
+    const uv = f.paths_img.slot(r.px, r.w, r.h) orelse return;
+    instPush(f, .{
+        .rect = .{ @floatCast(r.x), @floatCast(r.y), @floatCast(@as(f64, @floatFromInt(r.w))), @floatCast(@as(f64, @floatFromInt(r.h))) },
+        .color = .{ 1, 1, 1, 1 },
+        .border_color = .{ 0, 0, 0, 0 },
+        .uv = uv,
+        .clip = curClip(f),
+        .radius = 0,
+        .border_width = 0,
+        .kind = inst_pathtex,
+        .clip_round = clipRound(f),
+        .silk = .{ 0, 0, 0, 0 },
+    });
 }
