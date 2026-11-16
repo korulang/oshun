@@ -956,3 +956,107 @@ var live_win: ?*Window = null;
     _ = face;
     return @as(f64, @floatFromInt(2 * textScale(size)));
 }
+
+// ---- mesh: tessellated triangle soup (uniform with index.macos.kz) ----------
+// draw.mesh consumes Tri records from the koru-rive tessellator — the
+// koru-native polygon path. Rasterized in software: 2x2 supersampled
+// triangle fill, src-over, clip-aware — same coverage contract as
+// fillShape.
+
+const MeshData = struct { verts: std.ArrayList(f32) = .empty };
+var meshes: std.ArrayList(MeshData) = .empty;
+
+fn pointInTri(px: f32, py: f32, v: [6]f32) bool {
+    const ax = v[0]; const ay = v[1]; const bx = v[2]; const by = v[3]; const cx = v[4]; const cy = v[5];
+    const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+    const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+    const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+    const neg = (d1 < 0) or (d2 < 0) or (d3 < 0);
+    const pos = (d1 > 0) or (d2 > 0) or (d3 > 0);
+    return !(neg and pos);
+}
+
+fn fillTri(f: *Frame, ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, col: Col) void {
+    if (col.a == 0) return;
+    const minx = @floor(@min(ax, @min(bx, cx))) - 1;
+    const miny = @floor(@min(ay, @min(by, cy))) - 1;
+    const maxx = @ceil(@max(ax, @max(bx, cx))) + 1;
+    const maxy = @ceil(@max(ay, @max(by, cy))) + 1;
+    const ix0 = @max(0, @max(minx, 0));
+    const iy0 = @max(0, @max(miny, 0));
+    const ix1 = @min(@as(f64, @floatFromInt(f.w)), maxx);
+    const iy1 = @min(@as(f64, @floatFromInt(f.h)), maxy);
+    const a32: f32 = @floatCast(ax); const b32: f32 = @floatCast(ay);
+    const c32: f32 = @floatCast(bx); const d32: f32 = @floatCast(by);
+    const e32: f32 = @floatCast(cx); const f32_: f32 = @floatCast(cy);
+    var py = iy0;
+    while (py < iy1) : (py += 1) {
+        var px = ix0;
+        while (px < ix1) : (px += 1) {
+            var hits: u32 = 0;
+            var syi: u32 = 0;
+            while (syi < 2) : (syi += 1) {
+                var sxi: u32 = 0;
+                while (sxi < 2) : (sxi += 1) {
+                    const sx = @as(f32, @floatCast(px)) + 0.25 + @as(f32, @floatFromInt(sxi)) * 0.5;
+                    const sy = @as(f32, @floatCast(py)) + 0.25 + @as(f32, @floatFromInt(syi)) * 0.5;
+                    if (pointInTri(sx, sy, .{ a32, b32, c32, d32, e32, f32_ })) hits += 1;
+                }
+            }
+            if (hits == 0) continue;
+            const cov: f32 = @floatFromInt(hits) / 4.0;
+            const mx = @as(f32, @floatCast(px)) + 0.5;
+            const my = @as(f32, @floatCast(py)) + 0.5;
+            const cc = clipCov(f, mx, my);
+            if (cc <= 0.0) continue;
+            const a = cov * (@as(f32, @floatFromInt(col.a)) / 255.0) * @min(1.0, cc);
+            const ai: u32 = @intFromFloat(@round(@min(1.0, a) * 255.0));
+            if (ai == 0) continue;
+            blendInto(pxAt(f, @intFromFloat(px), @intFromFloat(py)), col.r, col.g, col.b, ai);
+        }
+    }
+    f.calls += 1;
+}
+
+~pub tor mesh.open { } -> i64
+
+~proc mesh.open|zig {
+    meshes.append(std.heap.page_allocator, .{}) catch @panic("canvas: OOM mesh registry");
+    return @intCast(meshes.items.len);
+}
+
+~pub tor mesh.tri { h: i64, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64 }
+
+~proc mesh.tri|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    const m = &meshes.items[@intCast(h - 1)];
+    m.verts.append(std.heap.page_allocator, @floatCast(x1)) catch {};
+    m.verts.append(std.heap.page_allocator, @floatCast(y1)) catch {};
+    m.verts.append(std.heap.page_allocator, @floatCast(x2)) catch {};
+    m.verts.append(std.heap.page_allocator, @floatCast(y2)) catch {};
+    m.verts.append(std.heap.page_allocator, @floatCast(x3)) catch {};
+    m.verts.append(std.heap.page_allocator, @floatCast(y3)) catch {};
+}
+
+~pub tor mesh.reset { h: i64 }
+
+~proc mesh.reset|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    meshes.items[@intCast(h - 1)].verts.clearRetainingCapacity();
+}
+
+~pub tor draw.mesh { f: *Frame<frame>, h: i64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.mesh|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    const m = &meshes.items[@intCast(h - 1)];
+    const col = colOf(r, g, b, a);
+    const n = m.verts.items.len;
+    var i: usize = 0;
+    while (i + 5 < n) : (i += 6) {
+        fillTri(f,
+            @floatCast(m.verts.items[i]), @floatCast(m.verts.items[i + 1]),
+            @floatCast(m.verts.items[i + 2]), @floatCast(m.verts.items[i + 3]),
+            @floatCast(m.verts.items[i + 4]), @floatCast(m.verts.items[i + 5]), col);
+    }
+}

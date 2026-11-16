@@ -122,6 +122,12 @@ extern fn CGPathAddQuadCurveToPoint(path: Id, transform: ?*anyopaque, cx: f64, c
 extern fn CGPathAddCurveToPoint(path: Id, transform: ?*anyopaque, c1x: f64, c1y: f64, c2x: f64, c2y: f64, x: f64, y: f64) callconv(.c) void;
 extern fn CGPathCloseSubpath(path: Id) callconv(.c) void;
 extern fn CGColorCreateGenericRGB(red: f64, green: f64, blue: f64, alpha: f64) callconv(.c) Id;
+// CGColorCreate(space, comps) builds the colour directly IN a given space, so
+// CoreGraphics performs no conversion. Use it whenever the destination bitmap
+// has a known space: CGColorCreateGenericRGB makes a *GenericRGB* (gamma 1.8)
+// colour, which CG then converts into the DeviceRGB (gamma ~2.2) context,
+// lifting every non-white value. That is what turned #313131 into #404040.
+extern fn CGColorCreate(space: Id, components: [*c]const f64) callconv(.c) Id;
 extern fn CGContextSetFillColorWithColor(ctx: CId, color: Id) callconv(.c) void;
 extern fn CGContextSetStrokeColorWithColor(ctx: CId, color: Id) callconv(.c) void;
 extern fn CGContextSetLineWidth(ctx: CId, width: f64) callconv(.c) void;
@@ -537,6 +543,28 @@ const msl_src: [:0]const u8 =
     \\    float a = c.a * coverage;
     \\    // Straight alpha out — the pipeline blends SourceAlpha/1-SourceAlpha.
     \\    return float4(c.rgb, a) * clip_cover;
+    \\}
+    \\// Tessellated triangle soup — mesh.open/tri/draw.mesh. Vertex data
+    \\// is float2 pixel positions in buffer(0); color+viewport in buffer(1).
+    \\struct TriParams {
+    \\    float4 color;
+    \\    float2 viewport;
+    \\};
+    \\struct TriOut {
+    \\    float4 pos [[position]];
+    \\    float4 color;
+    \\};
+    \\vertex TriOut tri_vertex(uint vid [[vertex_id]],
+    \\                          constant float2 *verts [[buffer(0)]],
+    \\                          constant TriParams& p [[buffer(1)]]) {
+    \\    float2 pix = verts[vid];
+    \\    TriOut o;
+    \\    o.pos = float4(pix.x / p.viewport.x * 2.0 - 1.0, 1.0 - pix.y / p.viewport.y * 2.0, 0.0, 1.0);
+    \\    o.color = p.color;
+    \\    return o;
+    \\}
+    \\fragment float4 tri_fragment(TriOut in [[stage_in]]) {
+    \\    return in.color;
     \\}
 ;
 
@@ -1631,7 +1659,7 @@ fn drawLiveFrame(win: *Window, cb: *const fn (*Frame) void) void {
     const enc = send1(Id, Id, buf, sel("renderCommandEncoderWithDescriptor:"), desc);
     send1(void, Id, enc, sel("setRenderPipelineState:"), win.pso);
     win.flushed = 0;
-    var f = Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast(CACurrentMediaTime()) };
+    var f = Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .pso_tri = win.pso_tri, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast(CACurrentMediaTime()) };
     win.text.beginFrame();
     win.images.beginFrame();
     win.path_img.beginFrame();
@@ -1760,6 +1788,7 @@ pub const Window = struct {
     pso: Id,
     pso_rect: Id,
     pso_inst: Id,
+    pso_tri: Id,
     vp_w: f32,
     vp_h: f32,
     lr_w: f32,
@@ -1797,6 +1826,7 @@ pub const Frame = struct {
     pso: Id,
     pso_rect: Id,
     pso_inst: Id,
+    pso_tri: Id,
     vp_w: f32,
     vp_h: f32,
     insts: *std.ArrayList(GpuInstance),
@@ -1830,7 +1860,9 @@ fn buildPipelines(device: Id) error{
     RectPso,
     InstFns,
     InstPso,
-}!struct { pso: Id, pso_rect: Id, pso_inst: Id } {
+    TriFns,
+    TriPso,
+}!struct { pso: Id, pso_rect: Id, pso_inst: Id, pso_tri: Id } {
     const srcStr = cf.CFStringCreateWithCString(null, msl_src.ptr, cf.kCFStringEncodingUTF8);
     var shaderErr: Id = null;
     const lib = send3(Id, Id, Id, *Id, device, sel("newLibraryWithSource:options:error:"), @as(Id, @ptrCast(@constCast(srcStr))), @as(Id, null), &shaderErr);
@@ -1917,7 +1949,33 @@ fn buildPipelines(device: Id) error{
         return error.InstPso;
     }
 
-    return .{ .pso = pso, .pso_rect = pso_rect, .pso_inst = pso_inst };
+    // Fourth pipeline: tessellated triangle soup — float2 vertex buffer,
+    // solid color. Same blend as rect/inst.
+    const tvname = cf.CFStringCreateWithCString(null, "tri_vertex", cf.kCFStringEncodingUTF8);
+    const tfname = cf.CFStringCreateWithCString(null, "tri_fragment", cf.kCFStringEncodingUTF8);
+    const tvfn = send1(Id, Id, lib, sel("newFunctionWithName:"), @as(Id, @ptrCast(@constCast(tvname))));
+    const tffn = send1(Id, Id, lib, sel("newFunctionWithName:"), @as(Id, @ptrCast(@constCast(tfname))));
+    if (tvfn == null or tffn == null) {
+        return error.TriFns;
+    }
+    const tpdesc = send(Id, cls("MTLRenderPipelineDescriptor"), sel("new"));
+    send1(void, Id, tpdesc, sel("setVertexFunction:"), tvfn);
+    send1(void, Id, tpdesc, sel("setFragmentFunction:"), tffn);
+    const tpatts = send(Id, tpdesc, sel("colorAttachments"));
+    const tpatt = send1(Id, u64, tpatts, sel("objectAtIndexedSubscript:"), 0);
+    send1(void, u64, tpatt, sel("setPixelFormat:"), 80);
+    send1(void, bool, tpatt, sel("setBlendingEnabled:"), true);
+    send1(void, u64, tpatt, sel("setSourceRGBBlendFactor:"), 4);
+    send1(void, u64, tpatt, sel("setDestinationRGBBlendFactor:"), 5);
+    send1(void, u64, tpatt, sel("setSourceAlphaBlendFactor:"), 1);
+    send1(void, u64, tpatt, sel("setDestinationAlphaBlendFactor:"), 5);
+    var tpsoErr: Id = null;
+    const pso_tri = send2(Id, Id, *Id, device, sel("newRenderPipelineStateWithDescriptor:error:"), tpdesc, &tpsoErr);
+    if (pso_tri == null) {
+        return error.TriPso;
+    }
+
+    return .{ .pso = pso, .pso_rect = pso_rect, .pso_inst = pso_inst, .pso_tri = pso_tri };
 }
 
 ~pub tor window.open { width: i32, height: i32, title: string }
@@ -2056,6 +2114,8 @@ fn windowCore(wobj: Id, width: i32, height: i32) WcResult {
             error.RectFns => "metal: rect shader functions not found in library",
             error.RectPso => "metal: rect pipeline state creation failed",
             error.InstFns => "metal: inst shader functions not found in library",
+            error.TriFns => "metal: tri shader functions not found in library",
+            error.TriPso => "metal: tri pipeline state creation failed",
             error.InstPso => "metal: inst pipeline state creation failed",
         } };
     };
@@ -2076,6 +2136,7 @@ fn windowCore(wobj: Id, width: i32, height: i32) WcResult {
         .pso = pipes.pso,
         .pso_rect = pipes.pso_rect,
         .pso_inst = pipes.pso_inst,
+        .pso_tri = pipes.pso_tri,
         .vp_w = @floatFromInt(width),
         .vp_h = @floatFromInt(height),
         .lr_w = -1,
@@ -2318,7 +2379,7 @@ fn overlayOrigin(width: f64, height: f64) NSPoint {
         $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), win.pso);
 
         win.flushed = 0;
-        var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
+        var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = tex, .scene_tex = &win.scene_tex, .captured = false, .device = win.device, .pso = win.pso, .pso_rect = win.pso_rect, .pso_inst = win.pso_inst, .pso_tri = win.pso_tri, .vp_w = win.vp_w, .vp_h = win.vp_h, .insts = &win.insts, .flushed = &win.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &win.text, .images = &win.images, .paths_img = &win.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
         win.text.beginFrame();
         win.images.beginFrame();
         frame(&__f);
@@ -2389,6 +2450,7 @@ pub const Surface = struct {
     pso: Id,
     pso_rect: Id,
     pso_inst: Id,
+    pso_tri: Id,
     vp_w: f32,
     vp_h: f32,
     clear: MTLClearColor,
@@ -2425,6 +2487,8 @@ pub const Surface = struct {
             error.RectFns => "metal: rect shader functions not found in library",
             error.RectPso => "metal: rect pipeline state creation failed",
             error.InstFns => "metal: inst shader functions not found in library",
+            error.TriFns => "metal: tri shader functions not found in library",
+            error.TriPso => "metal: tri pipeline state creation failed",
             error.InstPso => "metal: inst pipeline state creation failed",
         } };
     };
@@ -2457,6 +2521,7 @@ pub const Surface = struct {
         .pso = pipes.pso,
         .pso_rect = pipes.pso_rect,
         .pso_inst = pipes.pso_inst,
+        .pso_tri = pipes.pso_tri,
         .vp_w = @floatFromInt(width),
         .vp_h = @floatFromInt(height),
         .clear = .{ .red = 0.1, .green = 0.1, .blue = 0.15, .alpha = 1.0 },
@@ -2505,7 +2570,7 @@ pub const Surface = struct {
     $mod.send1(void, $mod.Id, enc, $mod.sel("setRenderPipelineState:"), s.pso);
 
     s.flushed = 0;
-    var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = s.tex, .scene_tex = &s.scene_tex, .captured = false, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .paths_img = &s.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
+    var __f = $mod.Frame{ .encoder = enc, .cmd = buf, .target = s.tex, .scene_tex = &s.scene_tex, .captured = false, .device = s.device, .pso = s.pso, .pso_rect = s.pso_rect, .pso_inst = s.pso_inst, .pso_tri = s.pso_tri, .vp_w = s.vp_w, .vp_h = s.vp_h, .insts = &s.insts, .flushed = &s.flushed, .clip_stack = undefined, .clip_depth = 0, .text = &s.text, .images = &s.images, .paths_img = &s.path_img, .time = @floatCast($mod.CACurrentMediaTime()) };
     s.text.beginFrame();
     s.images.beginFrame();
     s.path_img.beginFrame();
@@ -3392,14 +3457,16 @@ fn rasterizePath(
         // Transparent raster still uploads — callers may probe bounds.
     } else {
         if (do_fill) {
-            const col = CGColorCreateGenericRGB(fr, fg, fb, fa);
+            const comps = [4]f64{ fr, fg, fb, fa };
+            const col = CGColorCreate(cs, &comps);
             if (col != null) {
                 defer cf.CFRelease(col);
                 CGContextSetFillColorWithColor(bctx, col);
             }
         }
         if (do_stroke) {
-            const col = CGColorCreateGenericRGB(sr, sg, sb, sa);
+            const scomps = [4]f64{ sr, sg, sb, sa };
+            const col = CGColorCreate(cs, &scomps);
             if (col != null) {
                 defer cf.CFRelease(col);
                 CGContextSetStrokeColorWithColor(bctx, col);
@@ -3755,4 +3822,71 @@ fn clipMaskRaster(d: *PathData, ctm: [6]f64, x0: f64, y0: f64, x1: f64, y1: f64,
         .mask = .{ @floatCast(x0), @floatCast(y0), @floatCast(x1), @floatCast(y1), uv[0], uv[1], uv[2], uv[3] },
     };
     f.clip_depth += 1;
+}
+
+// ---- mesh: tessellated triangle soup (uniform with index.koru-native.kz) ----
+// mesh.open mints a handle; mesh.tri appends one triangle (pixel-space
+// float2 positions, y-down like every draw verb); draw.mesh uploads the
+// vertex buffer and draws through pso_tri. Identical signatures on both
+// arms — the koru-native arm rasterizes the same soup in software.
+
+const MeshData = struct { verts: std.ArrayList(f32) = .empty };
+var meshes: std.ArrayList(MeshData) = .empty;
+
+~pub tor mesh.open { } -> i64
+
+~proc mesh.open|zig {
+    meshes.append(std.heap.page_allocator, .{}) catch @panic("metal: OOM mesh registry");
+    return @intCast(meshes.items.len);
+}
+
+~pub tor mesh.tri { h: i64, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64 }
+
+~proc mesh.tri|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    const m = &meshes.items[@intCast(h - 1)];
+    const a = std.heap.page_allocator;
+    m.verts.append(a, @floatCast(x1)) catch {};
+    m.verts.append(a, @floatCast(y1)) catch {};
+    m.verts.append(a, @floatCast(x2)) catch {};
+    m.verts.append(a, @floatCast(y2)) catch {};
+    m.verts.append(a, @floatCast(x3)) catch {};
+    m.verts.append(a, @floatCast(y3)) catch {};
+}
+
+~pub tor mesh.reset { h: i64 }
+
+~proc mesh.reset|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    meshes.items[@intCast(h - 1)].verts.clearRetainingCapacity();
+}
+
+const TriParamsHost = extern struct {
+    r: f32, g: f32, b: f32, a: f32,
+    vw: f32, vh: f32,
+};
+
+~pub tor draw.mesh { f: *Frame<frame>, h: i64, r: f64, g: f64, b: f64, a: f64 }
+
+~proc draw.mesh|zig {
+    if (h < 1 or h > @as(i64, @intCast(meshes.items.len))) return;
+    const m = &meshes.items[@intCast(h - 1)];
+    const nv = m.verts.items.len;
+    if (nv < 6) return;
+    instFlush(f);
+    const buf = send3(
+        Id, ?*const anyopaque, u64, u64,
+        f.device, sel("newBufferWithBytes:length:options:"),
+        m.verts.items.ptr, nv * @sizeOf(f32), 0,
+    );
+    if (buf == null) @panic("metal: mesh buffer allocation failed");
+    send(void, buf, sel("autorelease"));
+    send1(void, Id, f.encoder, sel("setRenderPipelineState:"), f.pso_tri);
+    send3(void, Id, u64, u64, f.encoder, sel("setVertexBuffer:offset:atIndex:"), buf, 0, 0);
+    const tp: TriParamsHost = .{
+        .r = @floatCast(r), .g = @floatCast(g), .b = @floatCast(b), .a = @floatCast(a),
+        .vw = f.vp_w, .vh = f.vp_h,
+    };
+    send3(void, *const TriParamsHost, u64, u64, f.encoder, sel("setVertexBytes:length:atIndex:"), &tp, @sizeOf(TriParamsHost), 1);
+    send4(void, u64, u64, u64, u64, f.encoder, sel("drawPrimitives:vertexStart:vertexCount:instanceCount:"), 3, 0, nv / 2, 1);
 }
