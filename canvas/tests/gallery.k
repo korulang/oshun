@@ -36,6 +36,7 @@ import libs/components/code_codeview
 import libs/components/code_diffview
 import libs/components/code_turnview
 import libs/components/term_termview
+import libs/components/rive_card
 import libs/components/flow
 import libs/components/dome
 import libs/components/glasscard
@@ -62,7 +63,7 @@ std/store:new(world) {
     codeslot: -1[i64], diffslot: -1[i64], termh: -1[i64], seltork: -1[i64], termsel: -1[i64],
     tex: -1[i64], gtex: -1[i64], face: 0[i64], cface: -1[i64], dface: -1[i64], tface: -1[i64],
     fu: -1[i64], psel: -1[i64], dive: 0[i64], coghot: 0[i64],
-    mood: 0[i64], atork: -1[i64],
+    mood: 0[i64], atork: -1[i64], rivesel: -1[i64],
     l0: -1[i64], l1: -1[i64],
     v0: -1[i64], v1: -1[i64], v2: -1[i64], v3: -1[i64],
 }
@@ -211,6 +212,7 @@ oshun:component(seed, spec) {
                             |> std/store:insert(entries) { tx: "bp", sub: "82 mmhg — reference port 394x210", tork: 15 }
                                 | row lv |> std/store:stored { world.l0: lv }
                             |> std/store:insert(entries) { tx: "flight", sub: "SFO to YEG — reference port 400x155", tork: 16 }
+                            |> std/store:insert(entries) { tx: "rive", sub: ".riv leaf — clfp Main SM-animated", tork: 17 }
                                 | row lf |> std/store:stored { world.l1: lf }
                             |> std/store:insert(entries) { tx: "dome", sub: "neumorphism × glass — soft chrome", tork: 12 }
                                 | row _
@@ -344,6 +346,13 @@ oshun:component(seed, spec) {
                         | then |> std/store:stored { world.sel: world.termsel }
                     |> if (world.frame == 39 and world.live == 0)
                         | then |> libs/canvas:window.snap(path: "/tmp/gallery_pick_term.bmp")
+                    // select the rive entry by handle, snap the pick
+                    |> if (world.frame == 40 and world.live == 0)
+                        | then |> std/store:query(entries)
+                            ! query { [row]rq, [id]rid } when rq.tork == 17
+                                |> std/store:stored { world.sel: rid }
+                    |> if (world.frame == 45 and world.live == 0)
+                        | then |> libs/canvas:window.snap(path: "/tmp/gallery_pick_rive.bmp")
                     // EMIT — blind over view. el.clip carries no eid, so
                     // clip cmds are discriminated by DFS emission order:
                     // clip 0 is the sidebar list, clip 1 the stage.
@@ -479,6 +488,8 @@ oshun:component(seed, spec) {
                                 | then |> libs/components/reference_widgets:reference-bp(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 295.5, y: fworld.sy0 + 96.0, s: 1.5)
                             |> if (se.tork == 16)
                                 | then |> libs/components/reference_widgets:reference-flight(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 140.0, s: 1.5)
+                            |> if (se.tork == 17)
+                                | then |> libs/components/rive_card:rive-card(f, path: "/Users/larsde/src/koru-rive/rive-cpp/tests/unit_tests/assets/component_list_follow_path.riv", ab: 18, fr: world.frame, x: (fworld.sx0 + fworld.sx1) / 2.0 - 160.0, y: fworld.sy0 + 60.0, w: 320.0, h: 320.0)
                     // THE FLIGHT — the clicked row's pill travels to the
                     // header slot; its fill dissolves into bare text.
                     |> if (world.fu >= 0 and fworld.ft < 1.0)
