@@ -32,4 +32,6 @@
 | c _ when o.kind == 7 -> libs/canvas:transform.pop(f)
 | c _ when o.kind == 9 -> libs/canvas:draw.clip.push.path(f, p: hcell[0].h, evenodd: o.eo)
 | c _ when o.kind == 10 -> libs/canvas:draw.clip.pop(f)
-| c _ -> libs/canvas:draw.path(f, p: hcell[0].h, fr: (@as(f64, @floatFromInt((o.color >> 16) & 0xFF)) / 255.0), fg: (@as(f64, @floatFromInt((o.color >> 8) & 0xFF)) / 255.0), fb: (@as(f64, @floatFromInt((o.color >> 0) & 0xFF)) / 255.0), fa: (@as(f64, @floatFromInt((o.color >> 24) & 0xFF)) / 255.0), sr: 0, sg: 0, sb: 0, sa: 0, sw: o.thick, o.join, o.cap, evenodd: o.eo)
+| c _ when o.kind == 8 and o.style == 0 -> libs/canvas:draw.path(f, p: hcell[0].h, fr: 0, fg: 0, fb: 0, fa: 0, sr: (@as(f64, @floatFromInt((o.color >> 16) & 0xFF)) / 255.0), sg: (@as(f64, @floatFromInt((o.color >> 8) & 0xFF)) / 255.0), sb: (@as(f64, @floatFromInt((o.color >> 0) & 0xFF)) / 255.0), sa: (@as(f64, @floatFromInt((o.color >> 24) & 0xFF)) / 255.0), sw: o.thick, o.join, o.cap, evenodd: o.eo)
+| c _ when o.kind == 8 -> libs/canvas:draw.path(f, p: hcell[0].h, fr: (@as(f64, @floatFromInt((o.color >> 16) & 0xFF)) / 255.0), fg: (@as(f64, @floatFromInt((o.color >> 8) & 0xFF)) / 255.0), fb: (@as(f64, @floatFromInt((o.color >> 0) & 0xFF)) / 255.0), fa: (@as(f64, @floatFromInt((o.color >> 24) & 0xFF)) / 255.0), sr: 0, sg: 0, sb: 0, sa: 0, sw: o.thick, o.join, o.cap, evenodd: o.eo)
+| c _ -> libs/canvas:draw.path(f, p: hcell[0].h, fr: 0, fg: 0, fb: 0, fa: 0, sr: 0, sg: 0, sb: 0, sa: 0, sw: 0, o.join, o.cap, evenodd: o.eo)
