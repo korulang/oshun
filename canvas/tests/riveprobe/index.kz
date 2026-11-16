@@ -10,9 +10,19 @@
 ~pub tor open-store {}
 ~open-store = libs/canvas:path.open() : h |> std/grid:stored { hcell[0].h: h }
 
+// One persistent path handle, reset per shape — path.open per op leaks a
+// registry entry per shape per frame; live sessions exhaust it in ~2
+// frames (garbled, then gone). clip.push.path/draw.path copy geometry at
+// consume time, so reuse is safe.
+~pub tor path-cycle {}
+~path-cycle =
+    |> if (hcell[0].h == 0)
+        | then |> open-store()
+        | else |> libs/canvas:path.reset(p: hcell[0].h)
+
 ~pub tor step { o: kr/rive:OpRec, f: *libs/canvas:Frame<frame> }
 ~step = cond (o.kind)
-| c _ when o.kind == 0 -> open-store()
+| c _ when o.kind == 0 -> path-cycle()
 | c _ when o.kind == 1 -> libs/canvas:path.move(p: hcell[0].h, x: o.x1, y: o.y1)
 | c _ when o.kind == 2 -> libs/canvas:path.line(p: hcell[0].h, x: o.x1, y: o.y1)
 | c _ when o.kind == 3 -> libs/canvas:path.quad(p: hcell[0].h, cx: o.x1, cy: o.y1, x: o.x2, y: o.y2)
