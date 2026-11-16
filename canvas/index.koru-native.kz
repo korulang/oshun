@@ -1004,7 +1004,7 @@ fn fillTri(f: *Frame, ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, col:
                 }
             }
             if (hits == 0) continue;
-            const cov: f32 = @floatFromInt(hits) / 4.0;
+            const cov: f32 = @as(f32, @floatFromInt(hits)) / 4.0;
             const mx = @as(f32, @floatCast(px)) + 0.5;
             const my = @as(f32, @floatCast(py)) + 0.5;
             const cc = clipCov(f, mx, my);
