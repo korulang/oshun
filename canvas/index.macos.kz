@@ -3814,9 +3814,19 @@ fn clipMaskRaster(d: *PathData, ctm: [6]f64, x0: f64, y0: f64, x1: f64, y1: f64,
     } else {
         f.clip_stack[f.clip_depth] = .{ no_clip[0], no_clip[1], no_clip[2], no_clip[3], 0.0 };
     }
+    // Deep-copy the path: clip entries re-rasterize their stored handle
+    // on every later clip.push.path, and consumers reuse one handle via
+    // path.reset — storing `p` verbatim let the next reset destroy an
+    // active clip's geometry (clip_tests: frame clip zeroed by the
+    // ellipse clip's path-cycle -> covSum=0 mask).
+    var cpd = PathData{ .live = true };
+    cpd.verbs.appendSlice(std.heap.page_allocator, d.verbs.items) catch @panic("metal: OOM in clip path copy");
+    cpd.pts.appendSlice(std.heap.page_allocator, d.pts.items) catch @panic("metal: OOM in clip path copy");
+    paths.append(std.heap.page_allocator, cpd) catch @panic("metal: OOM in clip path copy");
+    const clipPathHandle: i64 = @intCast(paths.items.len);
     f.clip_path[f.clip_depth] = .{
         .on = true,
-        .path = p,
+        .path = clipPathHandle,
         .evenodd = evenodd,
         .ctm = ctm,
         .mask = .{ @floatCast(x0), @floatCast(y0), @floatCast(x1), @floatCast(y1), uv[0], uv[1], uv[2], uv[3] },
