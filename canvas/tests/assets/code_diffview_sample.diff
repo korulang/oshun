@@ -1,0 +1,59 @@
+diff --git a/canvas/tests/omni_img.kz b/canvas/tests/omni_img.kz
+index e5f8bb5..67e32b4 100644
+--- a/canvas/tests/omni_img.kz
++++ b/canvas/tests/omni_img.kz
+@@ -80,6 +80,8 @@ var kinds: [MAX_RESES]i64 = .{0} ** MAX_RESES;
+ var last_minted_buf: [16]u8 = undefined;
+ var last_minted_len: usize = 0;
+ 
++var transcript_buf: [MAX_RESES][4096]u8 = undefined;
++
+ var mint_seed: u64 = 0;
+ var mint_count: u32 = 0;
+ 
+@@ -246,10 +248,15 @@ fn decodeDoc(slot: usize) void {
+         $mod.opened += 1;
+     }
+     $mod.files[slot] = f;
+-    const n = @min(path.len, 255);
+-    @memcpy($mod.path_buf[slot][0..n], path[0..n]);
++    // Resolve through symlinks — a card minted on the remote-mic link
++    // should name the session it pointed at, and sidecars (.txt
++    // transcripts) live beside the real file, not the link.
++    var resolved: [std.fs.max_path_bytes]u8 = undefined;
++    const real = std.fs.cwd().realpath(path, &resolved) catch path;
++    const n = @min(real.len, 255);
++    @memcpy($mod.path_buf[slot][0..n], real[0..n]);
+     $mod.path_len[slot] = n;
+-    $mod.kinds[slot] = if (isImage(path)) 1 else if (isAudio(path)) 2 else 0;
++    $mod.kinds[slot] = if (isImage(real)) 1 else if (isAudio(real)) 2 else 0;
+     if ($mod.kinds[slot] == 2) decodeWave(slot);
+     if ($mod.kinds[slot] == 0) decodeDoc(slot);
+ 
+@@ -362,6 +369,41 @@ fn decodeDoc(slot: usize) void {
+     return $mod.kinds[s];
+ }
+ 
++// The transcript seam — a voice session's sidecar text, when the
++// Whistle watcher has landed it. Re-read per call on purpose: the card
++// mints at button-release and the transcript arrives a beat later, so a
++// stale read would never see it land. Absent or empty sidecar → "".
++// `res-transcript-n` is the byte count for the draw-side conditional.
++~[retain]pub tor res-transcript { slot: i64 } -> string
++
++~proc res-transcript|zig {
++    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
++    const n = transcriptRead(s);
++    return transcript_buf[s][0..n];
++}
++
++// Byte count — 0 doubles as "no transcript", matching kinds==0 docs
++// that decoded nothing: the surface reads the number, not a flag.
++~[retain]pub tor res-transcript-n { slot: i64 } -> i64
++
++~proc res-transcript-n|zig {
++    const s: usize = @intCast(@max(0, @min(slot, MAX_RESES - 1)));
++    return transcriptRead(s);
++}
++
+ fn isImage(p: []const u8) bool {

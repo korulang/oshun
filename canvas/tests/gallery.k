@@ -19,7 +19,9 @@
 // Resource-kind components (waveform/docpage) draw real minted
 // resources: the app file-opens a session wav and SCENE.md at startup
 // and scans res-max for their slots — the same custody plane the
-// bridge apps use, no stubs.
+// bridge apps use, no stubs. Demo assets (voice take, ObelMono face,
+// diff sample, turn sidecars) live in canvas/tests/assets/ — the /tmp
+// session files they replace were ephemeral by construction.
 //
 // Scripted twin: input drivers select entries on fixed frames, window
 // snaps at each pick, quits at 130 (the two reference-faithful ports are
@@ -142,7 +144,7 @@ oshun:component(seed, spec) {
             // Mint the two resources the resource-kind arms draw — real
             // bytes through the bridge's own wire, so custody stays
             // bridge-resident and the slots outlive this scope.
-            |> std/bridge:run(br, source: "file-open(path: \"/tmp/omni_remote_mic_19.wav\") | ok h |> say(text: \"minted wav\")\nfile-open(path: \"/Users/larsde/src/omni/SCENE.md\") | ok h |> say(text: \"minted doc\")\nfile-open(path: \"/Users/larsde/src/oshun/canvas/tests/silk_live.k\") | ok h |> say(text: \"minted code\")")
+            |> std/bridge:run(br, source: "file-open(path: \"/Users/larsde/src/oshun/canvas/tests/assets/voice_take.wav\") | ok h |> say(text: \"minted wav\")\nfile-open(path: \"/Users/larsde/src/omni/SCENE.md\") | ok h |> say(text: \"minted doc\")\nfile-open(path: \"/Users/larsde/src/oshun/canvas/tests/silk_live.k\") | ok h |> say(text: \"minted code\")")
                 | result _ |> std/io:print.ln("gallery: resources minted")
                 | partial p |> std/io:print.ln("mint partial: {{ p.report:s }}")
                 | error e |> std/io:print.ln("mint turn failed: {{ e.message:s }}")
@@ -173,16 +175,16 @@ oshun:component(seed, spec) {
                 | err v3e |> std/io:print.ln(v3e)
             // The code-surface components carry their own registry-side
             // font seams — one SF Mono face each, loaded through them.
-            |> libs/components/code_codeview:code-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
+            |> libs/components/code_codeview:code-font(path: "/Users/larsde/src/oshun/canvas/tests/assets/ObelMono-Regular.otf")
                 | font cfn |> std/store:stored { world.cface: cfn }
                 | err cfe |> std/io:print.ln(cfe)
-            |> libs/components/code_diffview:diff-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
+            |> libs/components/code_diffview:diff-font(path: "/Users/larsde/src/oshun/canvas/tests/assets/ObelMono-Regular.otf")
                 | font dfn |> std/store:stored { world.dface: dfn }
                 | err dfe |> std/io:print.ln(dfe)
-            |> libs/components/code_turnview:tv-font(path: "/tmp/obel/ObelMono-1.002/ObelMono/otf/ObelMono-Regular.otf")
+            |> libs/components/code_turnview:tv-font(path: "/Users/larsde/src/oshun/canvas/tests/assets/ObelMono-Regular.otf")
                 | font tfn |> std/store:stored { world.tface: tfn }
                 | err tfe |> std/io:print.ln(tfe)
-            |> libs/components/code_diffview:diff-load(path: "/tmp/code_diffview_sample.diff")
+            |> libs/components/code_diffview:diff-load(path: "/Users/larsde/src/oshun/canvas/tests/assets/code_diffview_sample.diff")
                 | ok dsl |> std/store:stored { world.diffslot: dsl }
                 | err dle |> std/io:print.ln(dle)
             |> libs/canvas:frames(win: w, count: if (world.live == 1) 999999 else 9999)
@@ -419,9 +421,9 @@ oshun:component(seed, spec) {
                             |> if (se.tork == 8 and world.diffslot >= 0 and world.dface >= 0)
                                 | then |> libs/components/code_diffview:diffview(f, slot: world.diffslot, face: world.dface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 150.0, scroll: 0.0, t: 1.0, a: 1.0)
                             |> if (se.tork == 9 and world.tface >= 0)
-                                | then |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_33.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 30.0, a: 1.0)
-                                    |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_36.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 224.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 38.0, a: 1.0)
-                                    |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 368.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 46.0, a: 1.0)
+                                | then |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_full.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 30.0, a: 1.0)
+                                    |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_second.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 224.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 38.0, a: 1.0)
+                                    |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/no_match.gate.json", face: world.tface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 368.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: 130.0, t: 46.0, a: 1.0)
                             |> if (se.tork == 10 and world.termh >= 0 and world.cface >= 0)
                                 | then |> libs/components/term_termview:termview(f, term: world.termh, face: world.cface, x: fworld.sx0 + 60.0, y: fworld.sy0 + 80.0, w: fworld.sx1 - fworld.sx0 - 120.0, h: fworld.sy1 - fworld.sy0 - 150.0, t: 1.0, a: 1.0)
                             // atork mirrors the live selection so mouse-down

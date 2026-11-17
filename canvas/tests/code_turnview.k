@@ -1,9 +1,9 @@
 // code_turnview — the turn renderer on a composed surface, headless.
-// Four real remote-mic gate sidecars (real voice turns against the ACP
-// bridge: utterance text, verdict, issued wire command) render as turn
-// cards on a champagne silk bed: a full acp turn (prompt + verdict note +
-// reply + tool row), a second acp turn, a no-match turn (prompt + note,
-// no reply, no wire), and the empty verdict (the real empty state).
+// Four gate sidecars from canvas/tests/assets/ — fixtures in
+// the remote-mic gate's real schema (rebuilt from ACP session journals;
+// the /tmp captures they replace were ephemeral): a full acp turn
+// (prompt + verdict note + reply + tool row), a second acp turn, a
+// no-match turn (prompt + note, no reply, no wire), and the empty verdict.
 // Cards cascade in on an 8-frame offset; each card's rows stagger on a
 // 5-frame cadence. A mid-motion snap lands beside the settled one.
 // tv-font loads SF Mono into metal's registry (the offscreen path can't
@@ -32,12 +32,12 @@ libs/canvas:offscreen.open(width: 720, height: 600, scale: 2.0)
                      |> libs/canvas:draw.roundrect(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                      // the surface's own header — the session this is
                      |> libs/canvas:draw.text(f, x: 48.0, y: 30.0, size: 14.0, r: 0.16, g: 0.12, b: 0.08, a: 0.75, text: "omni remote mic — session replay")
-                     |> libs/canvas:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four real turns · /tmp/omni_remote_mic_*.gate.json")
+                     |> libs/canvas:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four gate sidecars · canvas/tests/assets/*.gate.json")
                      // the turns — real sidecars, an 8-frame cascade
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_33.gate.json", face: world.fnt, x: 48.0, y: 72.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 0.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_36.gate.json", face: world.fnt, x: 48.0, y: 196.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 8.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.fnt, x: 48.0, y: 320.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 16.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_15.gate.json", face: world.fnt, x: 48.0, y: 444.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 24.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_full.gate.json", face: world.fnt, x: 48.0, y: 72.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 0.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_second.gate.json", face: world.fnt, x: 48.0, y: 196.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 8.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/no_match.gate.json", face: world.fnt, x: 48.0, y: 320.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 16.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/empty.gate.json", face: world.fnt, x: 48.0, y: 444.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 24.0, a: 1.0)
                  | done _
          |> libs/canvas:offscreen.snap(s, path: "/tmp/code_turnview_enter.bmp")
          |> for(0..8)
@@ -46,11 +46,11 @@ libs/canvas:offscreen.open(width: 720, height: 600, scale: 2.0)
                      |> std/store:stored { world.frame: world.frame + 1 }
                      |> libs/canvas:draw.roundrect(f, x: 0.0, y: 0.0, w: 720.0, h: 600.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
                      |> libs/canvas:draw.text(f, x: 48.0, y: 30.0, size: 14.0, r: 0.16, g: 0.12, b: 0.08, a: 0.75, text: "omni remote mic — session replay")
-                     |> libs/canvas:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four real turns · /tmp/omni_remote_mic_*.gate.json")
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_33.gate.json", face: world.fnt, x: 48.0, y: 72.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 0.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_36.gate.json", face: world.fnt, x: 48.0, y: 196.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 8.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_17.gate.json", face: world.fnt, x: 48.0, y: 320.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 16.0, a: 1.0)
-                     |> libs/components/code_turnview:turnview(f, path: "/tmp/omni_remote_mic_15.gate.json", face: world.fnt, x: 48.0, y: 444.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 24.0, a: 1.0)
+                     |> libs/canvas:draw.text(f, x: 48.0, y: 50.0, size: 9.5, r: 0.16, g: 0.12, b: 0.08, a: 0.4, text: "four gate sidecars · canvas/tests/assets/*.gate.json")
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_full.gate.json", face: world.fnt, x: 48.0, y: 72.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 0.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/acp_second.gate.json", face: world.fnt, x: 48.0, y: 196.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 8.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/no_match.gate.json", face: world.fnt, x: 48.0, y: 320.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 16.0, a: 1.0)
+                     |> libs/components/code_turnview:turnview(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/empty.gate.json", face: world.fnt, x: 48.0, y: 444.0, w: 624.0, h: 112.0, t: @as(f64, @floatFromInt(world.frame)) - 24.0, a: 1.0)
                  | done _
          |> libs/canvas:offscreen.snap(s, path: "/tmp/code_turnview.bmp")
          |> libs/canvas:offscreen.close(s)

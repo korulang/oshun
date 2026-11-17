@@ -23,7 +23,7 @@
 // a real empty state (the marker, the hairline, the quiet dash), not a
 // blank card.
 //
-//   turnview(f, path: "/tmp/omni_remote_mic_33.gate.json",
+//   turnview(f, path: "canvas/tests/assets/acp_full.gate.json",
 //            face: mono, x, y, w, h, t, a)
 //
 //   f      — the live frame borrow (draw calls hang off it)
