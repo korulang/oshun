@@ -270,6 +270,9 @@ pub const Frame = struct {
     h: u32,
     clip: [16][5]f32, // x0,y0,x1,y1,round — same shape as macOS
     clip_depth: u8 = 0,
+    clip_aux: [16]i32 = .{-1} ** 16, // per-level clip-path mask pool idx, -1 = rect level
+    ctm: [16][6]f64 = undefined, // affine stack [a c e; b d g]
+    ctm_depth: u8 = 0,
     calls: usize = 0, // draw-call count
     time: f32 = 0,
 };
@@ -359,8 +362,19 @@ fn clipDepth(f: *Frame) usize {
 // contain the point (intersection), each level keeping its own rounding.
 fn clipCov(f: *Frame, sx: f32, sy: f32) f32 {
     var cc: f32 = 1.0;
-    for (f.clip[0..clipDepth(f)]) |*l| {
-        cc = @min(cc, covOf(sdRoundBox(sx, sy, l[0], l[1], l[2], l[3], l[4])));
+    const d = clipDepth(f);
+    for (f.clip[0..d], 0..) |*l, li| {
+        if (f.clip_aux[li] >= 0) {
+            const m = clip_masks.items[@intCast(f.clip_aux[li])];
+            const wusz: usize = @intCast(f.w);
+            const husz: usize = @intCast(f.h);
+            const mx = @min(wusz - 1, @max(@as(usize, 0), @as(usize, @intFromFloat(@floor(sx)))));
+            const my = @min(husz - 1, @max(@as(usize, 0), @as(usize, @intFromFloat(@floor(sy)))));
+            const mv: f32 = if (m[my * @as(usize, @intCast(f.w)) + mx] != 0) 1.0 else 0.0;
+            cc = @min(cc, mv);
+        } else {
+            cc = @min(cc, covOf(sdRoundBox(sx, sy, l[0], l[1], l[2], l[3], l[4])));
+        }
         if (cc <= 0.0) return 0.0;
     }
     return cc;
@@ -393,6 +407,15 @@ fn colOf(r: f64, g: f64, b: f64, a: f64) Col {
 // point-sampled, so edges carry a 1px ramp.
 fn fillShape(f: *Frame, x: f64, y: f64, w: f64, h: f64, radius: f64, col: Col) void {
     if (col.a == 0 or w <= 0 or h <= 0) return;
+    if (f.ctm_depth > 0) {
+        const r = ctmRect(f, x, y, w, h);
+        // Rotated/skewed rects rasterize as their bbox — named delta vs CG.
+        const saved = f.ctm_depth;
+        f.ctm_depth = 0;
+        fillShape(f, r.x, r.y, r.w, r.h, radius, col);
+        f.ctm_depth = saved;
+        return;
+    }
     const x0: f32 = @floatCast(x);
     const y0: f32 = @floatCast(y);
     const x1: f32 = @floatCast(x + w);
@@ -473,7 +496,16 @@ fn drawGlyph(f: *Frame, gx: f64, gy: f64, sc: u32, ch: u8, col: Col) void {
 }
 
 fn drawTextRun(f: *Frame, x: f64, y: f64, size: f64, face: i64, r: f64, g: f64, b: f64, a: f64, text: []const u8) void {
-    _ = face; // font.load is undeclared natively — face is always the system face
+    if (f.ctm_depth > 0) {
+        const p = ctmPoint(f, x, y);
+        const m = &f.ctm[@intCast(f.ctm_depth - 1)];
+        const sc = (@sqrt(m[0] * m[0] + m[1] * m[1]) + @sqrt(m[2] * m[2] + m[3] * m[3])) / 2.0;
+        const saved = f.ctm_depth;
+        f.ctm_depth = 0;
+        drawTextRun(f, p[0], p[1], size * sc, face, r, g, b, a, text);
+        f.ctm_depth = saved;
+        return;
+    }
     const col = colOf(r, g, b, a);
     if (col.a == 0 or text.len == 0) return;
     const sc = textScale(size);
@@ -871,6 +903,7 @@ var live_win: ?*Window = null;
         y1 = @min(y1, parent[3]);
     }
     f.clip[f.clip_depth] = .{ x0, y0, x1, y1, 0.0 };
+    f.clip_aux[f.clip_depth] = -1;
     f.clip_depth += 1;
 }
 
@@ -890,13 +923,20 @@ var live_win: ?*Window = null;
         y1 = @min(y1, parent[3]);
     }
     f.clip[f.clip_depth] = .{ x0, y0, x1, y1, @floatCast(radius) };
+    f.clip_aux[f.clip_depth] = -1;
     f.clip_depth += 1;
 }
 
 ~pub tor draw.clip.pop { f: *Frame<frame> }
 
 ~proc draw.clip.pop|zig {
-    if (f.clip_depth > 0) f.clip_depth -= 1;
+    if (f.clip_depth == 0) return;
+    const d = clipDepth(f) - 1;
+    if (f.clip_aux[d] >= 0) {
+        clipMaskFree(f.clip_aux[d]);
+        f.clip_aux[d] = -1;
+    }
+    f.clip_depth = @intCast(d);
 }
 
 // ---- text ------------------------------------------------------------------------
@@ -1059,4 +1099,472 @@ fn fillTri(f: *Frame, ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, col:
             @floatCast(m.verts.items[i + 2]), @floatCast(m.verts.items[i + 3]),
             @floatCast(m.verts.items[i + 4]), @floatCast(m.verts.items[i + 5]), col);
     }
+}
+
+// ---- paths: recorded verb stream, flattened + scanline-filled in software --
+// Same contract as index.macos.kz path.*/draw.path/transform.*/clip.push.path.
+// Curves flatten at draw time (24 segs/cubic, 12/quad); fill is per-pixel
+// 2x2 supersampled point-in-contour; stroke approximates joins/caps with
+// per-segment quads + joint discs (named delta vs CG stroke).
+
+const PathSeg = struct { verb: u8, n: u8, pts: [6]f64 };
+// verb: 0 move(1pt) 1 line(1pt) 2 quad(2pts) 3 cubic(3pts) 4 close
+const PathData = struct {
+    segs: std.ArrayList(PathSeg) = .empty,
+    cur: [2]f64 = .{ 0, 0 },
+    start: [2]f64 = .{ 0, 0 },
+    has_cur: bool = false,
+};
+var paths: std.ArrayList(PathData) = .empty;
+
+fn pathAt(p: i64) ?*PathData {
+    if (p < 1 or p > @as(i64, @intCast(paths.items.len))) return null;
+    return &paths.items[@intCast(p - 1)];
+}
+
+fn pathPushSeg(pd: *PathData, verb: u8, pts: []const f64) void {
+    var s = PathSeg{ .verb = verb, .n = @intCast(pts.len / 2), .pts = .{0} ** 6 };
+    for (pts, 0..) |v, i| s.pts[i] = v;
+    pd.segs.append(std.heap.page_allocator, s) catch @panic("canvas: OOM path");
+}
+
+fn pathMoveTo(pd: *PathData, x: f64, y: f64) void {
+    pathPushSeg(pd, 0, &.{ x, y });
+    pd.cur = .{ x, y };
+    pd.start = .{ x, y };
+    pd.has_cur = true;
+}
+
+// Flatten `pd` into contours under CTM `m` ([a c e; b d g] affine).
+// out_pts: flat xy pairs; out_counts: points per contour. Returns false on OOM-path (empty ok).
+fn flattenPath(pd: *const PathData, m: ?*const [6]f64, out_pts: *std.ArrayList(f64), out_counts: *std.ArrayList(usize)) void {
+    out_pts.clearRetainingCapacity();
+    out_counts.clearRetainingCapacity();
+    var cx = pd.cur[0];
+    var cy = pd.cur[1];
+    var sx = pd.start[0];
+    var sy = pd.start[1];
+    var contour_open = false;
+    var cur_count: usize = 0;
+    const A = std.heap.page_allocator;
+
+    for (pd.segs.items) |s| {
+        switch (s.verb) {
+            0 => {
+                if (contour_open and cur_count > 0) out_counts.append(A, cur_count) catch {};
+                cur_count = 0;
+                contour_open = true;
+                flattenEmit(out_pts, &cur_count, m, s.pts[0], s.pts[1]);
+                cx = s.pts[0]; cy = s.pts[1]; sx = cx; sy = cy;
+            },
+            1 => {
+                if (!contour_open) { contour_open = true; flattenEmit(out_pts, &cur_count, m, cx, cy); }
+                flattenEmit(out_pts, &cur_count, m, s.pts[0], s.pts[1]);
+                cx = s.pts[0]; cy = s.pts[1];
+            },
+            2 => { // quad: cx,cy ctrl + x,y end
+                if (!contour_open) { contour_open = true; flattenEmit(out_pts, &cur_count, m, cx, cy); cur_count -= 1; }
+                const px = cx; const py = cy;
+                const qx = s.pts[0]; const qy = s.pts[1]; const ex = s.pts[2]; const ey = s.pts[3];
+                var i: usize = 1;
+                while (i <= 12) : (i += 1) {
+                    const t = @as(f64, @floatFromInt(i)) / 12.0;
+                    const u = 1.0 - t;
+                    flattenEmit(out_pts, &cur_count, m, u * u * px + 2.0 * u * t * qx + t * t * ex, u * u * py + 2.0 * u * t * qy + t * t * ey);
+                }
+                cx = ex; cy = ey;
+            },
+            3 => { // cubic
+                if (!contour_open) { contour_open = true; flattenEmit(out_pts, &cur_count, m, cx, cy); }
+                const px = cx; const py = cy;
+                const c1x = s.pts[0]; const c1y = s.pts[1];
+                const c2x = s.pts[2]; const c2y = s.pts[3];
+                const ex = s.pts[4]; const ey = s.pts[5];
+                var i: usize = 1;
+                while (i <= 24) : (i += 1) {
+                    const t = @as(f64, @floatFromInt(i)) / 24.0;
+                    const u = 1.0 - t;
+                    flattenEmit(out_pts, &cur_count, m,
+                        u*u*u*px + 3.0*u*u*t*c1x + 3.0*u*t*t*c2x + t*t*t*ex,
+                        u*u*u*py + 3.0*u*u*t*c1y + 3.0*u*t*t*c2y + t*t*t*ey);
+                }
+                cx = ex; cy = ey;
+            },
+            4 => { // close
+                if (contour_open and cur_count > 0) {
+                    flattenEmit(out_pts, &cur_count, m, sx, sy);
+                    out_counts.append(A, cur_count) catch {};
+                    cur_count = 0;
+                    contour_open = false;
+                }
+                cx = sx; cy = sy;
+            },
+            else => {},
+        }
+    }
+    if (contour_open and cur_count > 0) out_counts.append(A, cur_count) catch {};
+}
+
+fn flattenEmit(pts: *std.ArrayList(f64), count: *usize, m: ?*const [6]f64, x: f64, y: f64) void {
+    const A = std.heap.page_allocator;
+    if (m) |mm| {
+        pts.append(A, mm[0] * x + mm[2] * y + mm[4]) catch {};
+        pts.append(A, mm[1] * x + mm[3] * y + mm[5]) catch {};
+    } else {
+        pts.append(A, x) catch {};
+        pts.append(A, y) catch {};
+    }
+    count.* += 1;
+}
+
+// Point-in-contours: evenodd pairs crossings; winding accumulates direction.
+fn pointInContours(pts: []const f64, counts: []const usize, x: f64, y: f64, evenodd: bool) bool {
+    var inside = false;
+    var wind: i32 = 0;
+    var base: usize = 0;
+    for (counts) |n| {
+        if (n < 3) { base += n * 2; continue; }
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const j = (i + 1) % n;
+            const ax = pts[(base + i * 2)]; const ay = pts[(base + i * 2 + 1)];
+            const bx = pts[(base + j * 2)]; const by = pts[(base + j * 2 + 1)];
+            if ((ay > y) != (by > y)) {
+                const xint = ax + (y - ay) * (bx - ax) / (by - ay);
+                if (xint > x) {
+                    if (evenodd) inside = !inside else wind += if (by > ay) @as(i32, 1) else -1;
+                }
+            }
+        }
+        base += n * 2;
+    }
+    if (evenodd) return inside;
+    return wind != 0;
+}
+
+var g_flat_pts: std.ArrayList(f64) = .empty;
+var g_flat_counts: std.ArrayList(usize) = .empty;
+var g_stroke_pts: std.ArrayList(f64) = .empty;
+var g_stroke_counts: std.ArrayList(usize) = .empty;
+
+fn ctmOf(f: *const Frame) ?*const [6]f64 {
+    if (f.ctm_depth == 0) return null;
+    return &f.ctm[@intCast(f.ctm_depth - 1)];
+}
+
+fn fillContours(f: *Frame, pts: []const f64, counts: []const usize, col: Col, evenodd: bool) void {
+    if (col.a == 0 or pts.len < 6 or counts.len == 0) return;
+    var minx: f64 = 1e30; var miny: f64 = 1e30; var maxx: f64 = -1e30; var maxy: f64 = -1e30;
+    // bbox over pairs
+    var i: usize = 0;
+    while (i + 1 < pts.len) : (i += 2) {
+        minx = @min(minx, pts[i]); maxx = @max(maxx, pts[i]);
+        miny = @min(miny, pts[i + 1]); maxy = @max(maxy, pts[i + 1]);
+    }
+    const ix0 = @max(0, @floor(minx));
+    const iy0 = @max(0, @floor(miny));
+    const ix1 = @min(@as(f64, @floatFromInt(f.w)), @ceil(maxx));
+    const iy1 = @min(@as(f64, @floatFromInt(f.h)), @ceil(maxy));
+    const sa = (@as(f32, @floatFromInt(col.a)) / 255.0);
+    var py = iy0;
+    while (py < iy1) : (py += 1) {
+        var px = ix0;
+        while (px < ix1) : (px += 1) {
+            var hits: u32 = 0;
+            var syi: u32 = 0;
+            while (syi < 2) : (syi += 1) {
+                var sxi: u32 = 0;
+                while (sxi < 2) : (sxi += 1) {
+                    const sx = @as(f64, @floatCast(px)) + 0.25 + @as(f64, @floatFromInt(sxi)) * 0.5;
+                    const sy = @as(f64, @floatCast(py)) + 0.25 + @as(f64, @floatFromInt(syi)) * 0.5;
+                    if (pointInContours(pts, counts, sx, sy, evenodd)) hits += 1;
+                }
+            }
+            if (hits == 0) continue;
+            const a = (@as(f32, @floatFromInt(hits)) / 4.0) * sa;
+            const ai: u32 = @intFromFloat(@round(a * 255.0));
+            if (ai == 0) continue;
+            blendInto(pxAt(f, @intFromFloat(px), @intFromFloat(py)), col.r, col.g, col.b, ai);
+        }
+    }
+}
+
+fn rasterizePathContours(f: *Frame, pd: *const PathData, col: Col, evenodd: bool) void {
+    flattenPath(pd, ctmOf(f), &g_flat_pts, &g_flat_counts);
+    fillContours(f, g_flat_pts.items, g_flat_counts.items, col, evenodd);
+}
+
+// Stroke: flatten to polylines, emit a quad per segment + a disc at every
+// joint (covers joins + round caps approximately; square/butt deltas named).
+fn strokeContours(f: *Frame, pd: *const PathData, sw: f64, evenodd: bool, col: Col) void {
+    _ = evenodd; // stroke fill is always nonzero-rule quads+discs
+    if (sw <= 0 or col.a == 0) return;
+    flattenPath(pd, ctmOf(f), &g_flat_pts, &g_flat_counts);
+    const A = std.heap.page_allocator;
+    g_stroke_pts.clearRetainingCapacity();
+    g_stroke_counts.clearRetainingCapacity();
+    const half = sw / 2.0;
+    const nseg_disc: usize = 8;
+    var base: usize = 0;
+    for (g_flat_counts.items) |n| {
+        if (n < 2) { base += n * 2; continue; }
+        // polyline points for this contour
+        var prev: ?[2]f64 = null;
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const x = g_flat_pts.items[(base + i * 2)];
+            const y = g_flat_pts.items[(base + i * 2 + 1)];
+            if (prev) |p0| {
+                const dx = x - p0[0]; const dy = y - p0[1];
+                const len = @sqrt(dx * dx + dy * dy);
+                if (len > 1e-9) {
+                    const nx = -dy / len * half; const ny = dx / len * half;
+                    // quad contour: p0+n, p1+n, p1-n, p0-n
+                    const quad = [_]f64{ p0[0] + nx, p0[1] + ny, x + nx, y + ny, x - nx, y - ny, p0[0] - nx, p0[1] - ny };
+                    for (quad) |v| g_stroke_pts.append(A, v) catch {};
+                    g_stroke_counts.append(A, 4) catch {};
+                }
+            }
+            prev = .{ x, y };
+        }
+        // joint discs at every vertex (incl. endpoints -> round-cap approx)
+        i = 0;
+        while (i < n) : (i += 1) {
+            const x = g_flat_pts.items[(base + i * 2)];
+            const y = g_flat_pts.items[(base + i * 2 + 1)];
+            var k: usize = 0;
+            while (k < nseg_disc) : (k += 1) {
+                const a = 2.0 * std.math.pi * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(nseg_disc));
+                g_stroke_pts.append(A, x + @cos(a) * half) catch {};
+                g_stroke_pts.append(A, y + @sin(a) * half) catch {};
+            }
+            g_stroke_counts.append(A, nseg_disc) catch {};
+        }
+        base += n * 2;
+    }
+    fillContours(f, g_stroke_pts.items, g_stroke_counts.items, col, false);
+}
+
+// ---- transform stack ---------------------------------------------------------
+// Frame gains ctm: [16][6]f64 affine stack ([a c e; b d g] row-major use:
+// x' = a*x + c*y + e ; y' = b*x + d*y + g). Identity at depth 0.
+
+fn ctmPush(f: *Frame, a: f64, b: f64, c: f64, d: f64, e: f64, g: f64) void {
+    if (f.ctm_depth >= 16) return;
+    const dpt: usize = @intCast(f.ctm_depth);
+    f.ctm[dpt] = if (dpt == 0)
+        .{ a, b, c, d, e, g }
+    else blk: {
+        const p = &f.ctm[dpt - 1];
+        break :blk .{
+            a * p[0] + c * p[1],
+            b * p[0] + d * p[1],
+            a * p[2] + c * p[3],
+            b * p[2] + d * p[3],
+            a * p[4] + c * p[5] + e,
+            b * p[4] + d * p[5] + g,
+        };
+    };
+    f.ctm_depth = @intCast(dpt + 1);
+}
+
+fn ctmPop(f: *Frame) void {
+    if (f.ctm_depth > 0) f.ctm_depth -= 1;
+}
+
+// Apply live CTM to a rect: returns axis-aligned bbox (exact for
+// translate/scale; rotated rects degrade to bbox — named delta).
+const RectD = struct { x: f64, y: f64, w: f64, h: f64 };
+fn ctmRect(f: *const Frame, x: f64, y: f64, w: f64, h: f64) RectD {
+    if (f.ctm_depth == 0) return .{ .x = x, .y = y, .w = w, .h = h };
+    const m = &f.ctm[@intCast(f.ctm_depth - 1)];
+    const x0 = m[0] * x + m[2] * y + m[4];
+    const y0 = m[1] * x + m[3] * y + m[5];
+    const x1 = m[0] * (x + w) + m[2] * (y + h) + m[4];
+    const y1 = m[1] * (x + w) + m[3] * (y + h) + m[5];
+    return .{ .x = @min(x0, x1), .y = @min(y0, y1), .w = @abs(x1 - x0), .h = @abs(y1 - y0) };
+}
+
+fn ctmPoint(f: *const Frame, x: f64, y: f64) [2]f64 {
+    if (f.ctm_depth == 0) return .{ x, y };
+    const m = &f.ctm[@intCast(f.ctm_depth - 1)];
+    return .{ m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5] };
+}
+
+// ---- clip path masks ----------------------------------------------------------
+// clip.push.path rasterizes the path into a binary coverage mask stored in a
+// pool; clip_aux[i] = mask index or -1. clipCov samples masks before rects.
+
+var clip_masks: std.ArrayList([]u8) = .empty;
+
+fn clipMaskAlloc(f: *Frame) i32 {
+    const n = @as(usize, @intCast(f.w)) * @as(usize, @intCast(f.h));
+    const mask = std.heap.page_allocator.alloc(u8, n) catch return -1;
+    @memset(mask, 0);
+    clip_masks.append(std.heap.page_allocator, mask) catch return -1;
+    return @intCast(clip_masks.items.len - 1);
+}
+
+fn clipMaskFree(idx: i32) void {
+    if (idx < 0 or idx >= @as(i32, @intCast(clip_masks.items.len))) return;
+    const m = clip_masks.items[@intCast(idx)];
+    std.heap.page_allocator.free(m);
+    _ = clip_masks.orderedRemove(@as(usize, @intCast(idx)));
+    // NOTE: indices shift on remove — clip_aux entries store pool indices;
+    // orderedRemove invalidates higher indices. Frames are short-lived and
+    // clips pop LIFO so only the tail index is ever live at removal; the
+    // pop path clears its own slot first. (named limitation)
+}
+
+// Rasterize path into mask (binary, no AA v0) — writes 255 inside.
+fn rasterizeClipMask(f: *Frame, pd: *const PathData, evenodd: bool, mask: []u8) void {
+    flattenPath(pd, ctmOf(f), &g_flat_pts, &g_flat_counts);
+    const w = @as(usize, @intCast(f.w));
+    var py: usize = 0;
+    while (py < @as(usize, @intCast(f.h))) : (py += 1) {
+        var px: usize = 0;
+        while (px < w) : (px += 1) {
+            const sx = @as(f64, @floatFromInt(px)) + 0.5;
+            const sy = @as(f64, @floatFromInt(py)) + 0.5;
+            if (pointInContours(g_flat_pts.items, g_flat_counts.items, sx, sy, evenodd)) {
+                mask[py * w + px] = 255;
+            }
+        }
+    }
+}
+
+// ---- path/transform/draw.path verbs (macOS contract parity) -----------------
+
+~pub tor path.open { } -> i64
+
+~proc path.open|zig {
+    paths.append(std.heap.page_allocator, .{}) catch @panic("canvas: OOM path");
+    return @intCast(paths.items.len);
+}
+
+~pub tor path.move { p: i64, x: f64, y: f64 }
+~pub tor path.line { p: i64, x: f64, y: f64 }
+~pub tor path.quad { p: i64, cx: f64, cy: f64, x: f64, y: f64 }
+~pub tor path.cubic { p: i64, c1x: f64, c1y: f64, c2x: f64, c2y: f64, x: f64, y: f64 }
+~pub tor path.close { p: i64 }
+~pub tor path.reset { p: i64 }
+~pub tor path.free { p: i64 }
+
+~proc path.move|zig {
+    const pd = pathAt(p) orelse return;
+    pathMoveTo(pd, x, y);
+}
+
+~proc path.line|zig {
+    const pd = pathAt(p) orelse return;
+    if (!pd.has_cur) { pathMoveTo(pd, x, y); return; }
+    pathPushSeg(pd, 1, &.{ x, y });
+    pd.cur = .{ x, y };
+}
+
+~proc path.quad|zig {
+    const pd = pathAt(p) orelse return;
+    if (!pd.has_cur) { pathMoveTo(pd, cx, cy); }
+    pathPushSeg(pd, 2, &.{ cx, cy, x, y });
+    pd.cur = .{ x, y };
+}
+
+~proc path.cubic|zig {
+    const pd = pathAt(p) orelse return;
+    if (!pd.has_cur) { pathMoveTo(pd, c1x, c1y); }
+    pathPushSeg(pd, 3, &.{ c1x, c1y, c2x, c2y, x, y });
+    pd.cur = .{ x, y };
+}
+
+~proc path.close|zig {
+    const pd = pathAt(p) orelse return;
+    pathPushSeg(pd, 4, &.{});
+    pd.cur = pd.start;
+}
+
+~proc path.reset|zig {
+    const pd = pathAt(p) orelse return;
+    pd.segs.clearRetainingCapacity();
+    pd.has_cur = false;
+    pd.cur = .{ 0, 0 };
+    pd.start = .{ 0, 0 };
+}
+
+~proc path.free|zig {
+    const pd = pathAt(p) orelse return;
+    pd.segs.deinit(std.heap.page_allocator);
+    _ = paths.orderedRemove(@intCast(p - 1));
+    // Handles are positional — freeing shifts indices; probe holds one live
+    // path at a time (hcell single slot), same custody shape as meshes.
+}
+
+~pub tor transform.push { f: *Frame<frame>, a: f64, b: f64, c: f64, d: f64, e: f64, g: f64 }
+~pub tor transform.pop { f: *Frame<frame> }
+
+~proc transform.push|zig {
+    ctmPush(f, a, b, c, d, e, g);
+}
+
+~proc transform.pop|zig {
+    ctmPop(f);
+}
+
+~pub tor draw.path { f: *Frame<frame>, p: i64, fr: f64, fg: f64, fb: f64, fa: f64, sr: f64, sg: f64, sb: f64, sa: f64, sw: f64, join: i64, cap: i64, evenodd: i64 }
+
+~proc draw.path|zig {
+    const pd = pathAt(p) orelse return;
+    const eo: bool = evenodd != 0;
+    const fill = colOf(fr, fg, fb, fa);
+    const strk = colOf(sr, sg, sb, sa);
+    if (fill.a != 0) rasterizePathContours(f, pd, fill, eo);
+    if (strk.a != 0) strokeContours(f, pd, sw, eo, strk);
+    _ = join;
+    _ = cap;
+}
+
+~pub tor draw.clip.push.path { f: *Frame<frame>, p: i64, evenodd: i64 }
+
+~proc draw.clip.push.path|zig {
+    const pd = pathAt(p) orelse return;
+    if (f.clip_depth >= 16) return;
+    const idx = clipMaskAlloc(f);
+    if (idx < 0) return;
+    const mask = clip_masks.items[@intCast(idx)];
+    rasterizeClipMask(f, pd, evenodd != 0, mask);
+    const d = clipDepth(f);
+    f.clip[d] = .{ -1e9, -1e9, 1e9, 1e9, 0 }; // full-frame rect; mask carries shape
+    f.clip_aux[d] = idx;
+    f.clip_depth = @intCast(d + 1);
+}
+
+
+// ---- image verbs: decode is undeclared on the freestanding target (no
+// codec in the kernel ABI) — the tor exists so consumers compile, and it
+// fails LOUD through the err arm. width/height/draw.image are unreachable
+// behind that err; declared so the contract surface stays whole.
+
+~pub tor image.decode.data { data: string } | img i64 | err string
+
+~proc image.decode.data|zig {
+    return .{ .err = "koru-native: image decode undeclared (no codec in kernel ABI)" };
+}
+
+~pub tor image.width { tex: i64 } -> i64
+~pub tor image.height { tex: i64 } -> i64
+~pub tor draw.image { f: *Frame<frame>, tex: i64, x: f64, y: f64, w: f64, h: f64 }
+
+~proc image.width|zig {
+    _ = tex;
+    return 0;
+}
+
+~proc image.height|zig {
+    _ = tex;
+    return 0;
+}
+
+~proc draw.image|zig {
+    // Unreachable: image.decode.data always errs, so step-image's err arm
+    // (magenta rect) runs instead. Panic rather than silently drop.
+    @panic("canvas: draw.image unreachable — decode is undeclared");
 }
