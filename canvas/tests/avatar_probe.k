@@ -19,10 +19,10 @@ std/store:new(theme) {
 libs/canvas:window.open(width: 800, height: 560, title: "avatar probe")
 | win w
     |> libs/canvas:window.clear.color(win: w, r: 0.90, g: 0.92, b: 0.96)
-    |> libs/canvas:font.load(win: w, path: "/Users/larsde/Downloads/SF-Pro.ttf")
+    |> libs/canvas:font.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/SF-Pro.ttf")
         | font fc |> std/store:stored { st.face: fc }
         | err fe |> std/io:print.ln(fe)
-    |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/6digit-victoria/neutral_albedo.jpg")
+    |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/victoria_probe_albedo.jpg")
         | img tx |> std/store:stored { st.tex: tx }
         | err ie |> std/io:print.ln(ie)
     |> libs/canvas:frames(win: w, count: 30)

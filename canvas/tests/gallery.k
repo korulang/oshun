@@ -19,9 +19,10 @@
 // Resource-kind components (waveform/docpage) draw real minted
 // resources: the app file-opens a session wav and SCENE.md at startup
 // and scans res-max for their slots — the same custody plane the
-// bridge apps use, no stubs. Demo assets (voice take, ObelMono face,
-// diff sample, turn sidecars) live in canvas/tests/assets/ — the /tmp
-// session files they replace were ephemeral by construction.
+// bridge apps use, no stubs. Every demo asset — voice take, faces,
+// photo, .riv, diff sample, turn sidecars — lives in
+// canvas/tests/assets/; nothing the gallery draws is borrowed from
+// ~/Downloads, another repo's output dir, or ephemeral /tmp state.
 //
 // Scripted twin: input drivers select entries on fixed frames, window
 // snaps at each pick, quits at 130 (the two reference-faithful ports are
@@ -148,29 +149,29 @@ oshun:component(seed, spec) {
                 | result _ |> std/io:print.ln("gallery: resources minted")
                 | partial p |> std/io:print.ln("mint partial: {{ p.report:s }}")
                 | error e |> std/io:print.ln("mint turn failed: {{ e.message:s }}")
-            |> libs/canvas:font.load(win: w, path: "/Users/larsde/Downloads/SF-Pro.ttf")
+            |> libs/canvas:font.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/SF-Pro.ttf")
                 | font fc |> std/store:stored { world.face: fc }
                 | err fe |> std/io:print.ln(fe)
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/Downloads/apple-remote.png")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/apple-remote.png")
                 | img itx |> std/store:stored { world.tex: itx }
                 | err ie |> std/io:print.ln(ie)
             // The dome's glass needs a real photograph behind it —
             // frost samples the captured scene, flat fills read as milk.
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/Downloads/86474.jpg")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/dome_backdrop.jpg")
                 | img gtx |> std/store:stored { world.gtex: gtx }
                 | err ge |> std/io:print.ln(ge)
             // Victoria's faces — the avatar entry's mood set. Four
             // distinct portraits; mood buttons swap the medallion.
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/neutral_albedo.png")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/victoria/neutral_albedo.png")
                 | img v0x |> std/store:stored { world.v0: v0x }
                 | err v0e |> std/io:print.ln(v0e)
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/smiling_albedo.jpg")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/victoria/smiling_albedo.jpg")
                 | img v1x |> std/store:stored { world.v1: v1x }
                 | err v1e |> std/io:print.ln(v1e)
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/worried_albedo.png")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/victoria/worried_albedo.png")
                 | img v2x |> std/store:stored { world.v2: v2x }
                 | err v2e |> std/io:print.ln(v2e)
-            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/armored-rail-assets/output/generated/portraits/victoria/determined_albedo.png")
+            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/victoria/determined_albedo.png")
                 | img v3x |> std/store:stored { world.v3: v3x }
                 | err v3e |> std/io:print.ln(v3e)
             // The code-surface components carry their own registry-side
@@ -491,7 +492,7 @@ oshun:component(seed, spec) {
                             |> if (se.tork == 16)
                                 | then |> libs/components/reference_widgets:reference-flight(win: w, f, world.face, x: (fworld.sx0 + fworld.sx1) / 2.0 - 300.0, y: fworld.sy0 + 140.0, s: 1.5)
                             |> if (se.tork == 17)
-                                | then |> libs/components/rive_card:rive-card(f, path: "/Users/larsde/src/koru-rive/rive-cpp/tests/unit_tests/assets/component_list_follow_path.riv", ab: 18, fr: world.frame, x: (fworld.sx0 + fworld.sx1) / 2.0 - 160.0, y: fworld.sy0 + 60.0, w: 320.0, h: 320.0)
+                                | then |> libs/components/rive_card:rive-card(f, path: "/Users/larsde/src/oshun/canvas/tests/assets/component_list_follow_path.riv", ab: 18, fr: world.frame, x: (fworld.sx0 + fworld.sx1) / 2.0 - 160.0, y: fworld.sy0 + 60.0, w: 320.0, h: 320.0)
                     // THE FLIGHT — the clicked row's pill travels to the
                     // header slot; its fill dissolves into bare text.
                     |> if (world.fu >= 0 and fworld.ft < 1.0)

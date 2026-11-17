@@ -82,7 +82,7 @@ std/store:insert(res) { slot: 0, alive: 0, kind: 0, tex: 0, born: 0, touched: 0,
                             |> libs/canvas:font.load(win: w, path: "/tmp/archivo/Archivo_Black/ArchivoBlack-Regular.ttf")
                                 | font fnt |> std/store:stored { world.face: fnt }
                                 | err e |> std/io:print.ln("font failed: {{ e:s }}")
-                            |> libs/canvas:image.load(win: w, path: "/Users/larsde/Downloads/apple-remote.png")
+                            |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/apple-remote.png")
                                 | img rimg |> std/store:stored { world.remote: rimg }
                                 | err e |> std/io:print.ln("remote png: {{ e:s }}")
                             |> libs/canvas:frames(win: w, count: 99999)

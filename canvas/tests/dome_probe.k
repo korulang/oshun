@@ -1,6 +1,6 @@
 // Dome probe — the glass-first dome over a real photograph, palette
 // ctx-injected from a theme store exactly as the gallery does. The
-// backdrop is /Users/larsde/Downloads/86474.jpg (forest). Snaps
+// backdrop is /Users/larsde/src/oshun/canvas/tests/assets/dome_backdrop.jpg (forest). Snaps
 // /tmp/dome_probe.bmp at frame 20, quits at 25.
 import libs/host
 import libs/canvas
@@ -27,7 +27,7 @@ libs/canvas:window.open(width: 800, height: 560, title: "dome probe")
     |> libs/canvas:font.load(win: w, path: "/System/Library/Fonts/SFNSMono.ttf")
         | font fc |> std/store:stored { st.face: fc }
         | err fe |> std/io:print.ln(fe)
-    |> libs/canvas:image.load(win: w, path: "/Users/larsde/Downloads/86474.jpg")
+    |> libs/canvas:image.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/dome_backdrop.jpg")
         | img tx |> std/store:stored { st.tex: tx }
         | err ie |> std/io:print.ln(ie)
     |> libs/canvas:frames(win: w, count: 90)

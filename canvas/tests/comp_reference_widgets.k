@@ -15,7 +15,7 @@ std/store:new(world) { frame: 0[i64], face: -1[i64] }
 
 libs/canvas:window.open(width: 900, height: 250, title: "omni / reference widgets")
 | win w |> libs/canvas:window.clear.color(win: w, r: 0.169, g: 0.169, b: 0.169)
-    |> libs/canvas:font.load(win: w, path: "/Users/larsde/Downloads/SF-Pro.ttf")
+    |> libs/canvas:font.load(win: w, path: "/Users/larsde/src/oshun/canvas/tests/assets/SF-Pro.ttf")
         | font fc |> std/store:stored { world.face: fc }
         | err fe |> std/io:print.ln(fe)
     |> libs/canvas:frames(win: w, count: 9999)
