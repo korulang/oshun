@@ -18,6 +18,7 @@ typedef struct Surf {
     uint32_t w, h;
     uint32_t *px;      // w*h pixels, 0x00RRGGBB
     int dirty;
+    char tag[64];
 } Surf;
 
 static Surf *g_last = NULL;
@@ -27,6 +28,8 @@ void *koruos_surface_open(uint32_t w, uint32_t h, const char *title) {
     Surf *s = calloc(1, sizeof(Surf));
     if (!s) return NULL;
     s->w = w; s->h = h;
+    if (title) { strncpy(s->tag, title, sizeof(s->tag) - 1); s->tag[sizeof(s->tag)-1] = 0; }
+    else snprintf(s->tag, sizeof s->tag, "%ux%u", w, h);
     s->px = calloc((size_t)w * h, 4);
     if (!s->px) { free(s); return NULL; }
     g_last = s;
@@ -44,7 +47,8 @@ uint8_t koruos_surface_close(void *p) {
     if (s && s->dirty) {
         // dump 32-bit BMP (top-down negative height), 0x00RRGGBB -> BGRX
         char path[256];
-        snprintf(path, sizeof path, "/tmp/kn_surface_%ux%u.bmp", s->w, s->h);
+        const char *env = getenv("KN_TAG");
+        snprintf(path, sizeof path, "/tmp/kn_surface_%s.bmp", env ? env : s->tag);
         FILE *fp = fopen(path, "wb");
         if (fp) {
             uint32_t row = ((s->w * 4 + 3) / 4) * 4;

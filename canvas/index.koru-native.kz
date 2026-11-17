@@ -1284,7 +1284,10 @@ fn fillContours(f: *Frame, pts: []const f64, counts: []const usize, col: Col, ev
             const a = (@as(f32, @floatFromInt(hits)) / 4.0) * sa;
             const ai: u32 = @intFromFloat(@round(a * 255.0));
             if (ai == 0) continue;
-            blendInto(pxAt(f, @intFromFloat(px), @intFromFloat(py)), col.r, col.g, col.b, ai);
+            // pxBlend applies clipCov — fillContours must not bypass clips.
+            pxBlend(f, @intFromFloat(px), @intFromFloat(py),
+                @as(f32, @floatCast(px)) + 0.5, @as(f32, @floatCast(py)) + 0.5,
+                col.r, col.g, col.b, ai);
         }
     }
 }
