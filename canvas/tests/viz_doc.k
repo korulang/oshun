@@ -3,7 +3,7 @@
 // (the challenge's own CHALLENGE.md and the repo's SCENE.md → kind 0, the
 // docpage arm — each card typeset in its resource's own leading lines),
 // one Mach-O binary with a doc kind (/bin/zsh → kind 0, zero lines — the
-// honest empty card, nothing invented), and one Siri Remote mic session
+// honest empty card, nothing invented), and one voice-take fixture
 // (kind 2 → the waveform arm, proving the dispatch ladder picks the right
 // renderer per resource). Dispatch reads the bridge's kind field —
 // res-kind — never the path; the two docs mint the same kind but draw
@@ -25,7 +25,7 @@ import app/omni_img
 std/store:new(world) { frame: 0[i64] }
 
 [with]std/bridge:create(id: "omni", scope: "image", world: "/tmp/omni_world"): br
-|> std/bridge:run(br, source: "file-open(path: \"/Users/larsde/src/oshun/.claude/worktrees/replay-visualizer-02/challenges/visualizer/CHALLENGE.md\") | ok h |> say(text: \"minted challenge\")\nfile-open(path: \"/Users/larsde/src/oshun/.claude/worktrees/replay-visualizer-02/SCENE.md\") | ok h |> say(text: \"minted scene\")\nfile-open(path: \"/bin/zsh\") | ok h |> say(text: \"minted binary\")\nfile-open(path: \"/tmp/omni_remote_mic_2.wav\") | ok h |> say(text: \"minted wav\")")
+|> std/bridge:run(br, source: "file-open(path: \"/Users/larsde/src/oshun/challenges/visualizer/CHALLENGE.md\") | ok h |> say(text: \"minted challenge\")\nfile-open(path: \"/Users/larsde/src/oshun/SCENE.md\") | ok h |> say(text: \"minted scene\")\nfile-open(path: \"/bin/zsh\") | ok h |> say(text: \"minted binary\")\nfile-open(path: \"/Users/larsde/src/oshun/canvas/tests/assets/voice_take.wav\") | ok h |> say(text: \"minted wav\")")
     | result _ |> std/io:print.ln("turn result")
     | partial p |> std/io:print.ln("{{ p.report:s }}")
         |> app/omni_img:res-live(slot: 0) : l0
@@ -82,7 +82,7 @@ std/store:new(world) { frame: 0[i64] }
                             |> libs/canvas:draw.text(f, x: 614.0, y: 280.0, size: 10.0, r: 0.16, g: 0.12, b: 0.08, a: 0.55, text: "audio")
                     |> app/omni_img:res-id(slot: 2) : id2
                         |> libs/canvas:draw.text(f, x: 614.0, y: 316.0, size: 11.0, r: 0.16, g: 0.12, b: 0.08, a: 0.8, text: id2)
-                    // card 3 — slot 3: a real mic session — kind 2 takes the
+                    // card 3 — slot 3: a voice take — kind 2 takes the
                     // waveform arm, the other half of the dispatch ladder
                     |> libs/canvas:draw.panel(f, x: 870.0, y: 110.0, w: 240.0, h: 190.0, radius: 12.0, r: 0.97, g: 0.95, b: 0.89, a: 0.92, bw: 1.0, br: 0.80, bg: 0.70, bb: 0.55, ba: 0.5)
                     |> if (k3p == 0)

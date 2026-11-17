@@ -1,6 +1,6 @@
 // viz_audio — the kind-dispatched audio renderer, alone on the champagne
-// wall. Four real mints through the bridge's file-open: two Siri Remote
-// mic sessions (/tmp/omni_remote_mic_*.wav → kind 2, the waveform arm),
+// wall. Four real mints through the bridge's file-open: two synthesized
+// voice takes (canvas/tests/assets/voice_take*.wav → kind 2, the waveform arm),
 // one file NAMED .wav whose bytes aren't RIFF (kind 2, zero buckets —
 // the honest bare rail, nothing invented), and one markdown doc (kind 0,
 // the generic silk + id arm). Dispatch reads the bridge's kind field —
@@ -23,7 +23,7 @@ import app/omni_img
 std/store:new(world) { frame: 0[i64] }
 
 [with]std/bridge:create(id: "omni", scope: "image", world: "/tmp/omni_world"): br
-|> std/bridge:run(br, source: "file-open(path: \"/tmp/omni_remote_mic_1.wav\") | ok h |> say(text: \"minted 1\")\nfile-open(path: \"/tmp/omni_remote_mic_3.wav\") | ok h |> say(text: \"minted 3\")\nfile-open(path: \"/Users/larsde/src/oshun/challenges/visualizer/CATALOG.md\") | ok h |> say(text: \"minted doc\")\nfile-open(path: \"/tmp/not_really.wav\") | ok h |> say(text: \"minted fake\")")
+|> std/bridge:run(br, source: "file-open(path: \"/Users/larsde/src/oshun/canvas/tests/assets/voice_take.wav\") | ok h |> say(text: \"minted 1\")\nfile-open(path: \"/Users/larsde/src/oshun/canvas/tests/assets/voice_take_alt.wav\") | ok h |> say(text: \"minted 3\")\nfile-open(path: \"/Users/larsde/src/oshun/challenges/visualizer/CATALOG.md\") | ok h |> say(text: \"minted doc\")\nfile-open(path: \"/Users/larsde/src/oshun/canvas/tests/assets/not_really.wav\") | ok h |> say(text: \"minted fake\")")
     | result _ |> std/io:print.ln("turn result")
     | partial p |> std/io:print.ln("{{ p.report:s }}")
         |> app/omni_img:res-live(slot: 0) : l0
@@ -52,7 +52,7 @@ std/store:new(world) { frame: 0[i64] }
                     |> std/store:stored { world.frame: world.frame + 1 }
                     // the room — champagne silk, same drape as the commander's
                     |> libs/canvas:draw.roundrect(f, x: 0.0, y: 0.0, w: 1180.0, h: 420.0, radius: 0.0, r: 0.91, g: 0.85, b: 0.72, a: 1.0)
-                    // card 0 — slot 0: mic session 1
+                    // card 0 — slot 0: voice take A
                     |> libs/canvas:draw.panel(f, x: 60.0, y: 120.0, w: 240.0, h: 170.0, radius: 12.0, r: 0.97, g: 0.95, b: 0.89, a: 0.92, bw: 1.0, br: 0.80, bg: 0.70, bb: 0.55, ba: 0.5)
                     |> if (k0p == 2)
                         | then |> libs/components:waveform(f, slot: 0, x: 74.0, y: 134.0, w: 212.0, h: 128.0, a: 0.9)
@@ -61,7 +61,7 @@ std/store:new(world) { frame: 0[i64] }
                         | then |> libs/canvas:draw.text(f, x: 74.0, y: 190.0, size: 12.0, r: 0.16, g: 0.12, b: 0.08, a: 0.5, text: "document")
                     |> app/omni_img:res-id(slot: 0) : id0
                         |> libs/canvas:draw.text(f, x: 74.0, y: 304.0, size: 11.0, r: 0.16, g: 0.12, b: 0.08, a: 0.8, text: id0)
-                    // card 1 — slot 1: mic session 3 (different bytes, different bars)
+                    // card 1 — slot 1: voice take B (different bytes, different bars)
                     |> libs/canvas:draw.panel(f, x: 330.0, y: 120.0, w: 240.0, h: 170.0, radius: 12.0, r: 0.97, g: 0.95, b: 0.89, a: 0.92, bw: 1.0, br: 0.80, bg: 0.70, bb: 0.55, ba: 0.5)
                     |> if (k1p == 2)
                         | then |> libs/components:waveform(f, slot: 1, x: 344.0, y: 134.0, w: 212.0, h: 128.0, a: 0.9)
